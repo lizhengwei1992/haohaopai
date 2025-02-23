@@ -19,13 +19,22 @@ class _CameraScreenState extends State<CameraScreen> {
   late CameraController _controller;
   late Future<void> _initializeControllerFuture;
   bool _showingTips = false;
+  double _minAvailableZoom = 1.0;
+  double _maxAvailableZoom = 1.0;
+  double _currentZoom = 1.0;
+  double _baseZoom = 1.0;
 
   @override
   void initState() {
     super.initState();
     // 初始化相机
     _controller = CameraController(widget.cameras[0], ResolutionPreset.high);
-    _initializeControllerFuture = _controller.initialize();
+    _initializeControllerFuture = _controller.initialize().then((_) async {
+      // 获取相机支持的最大/最小焦距
+      _minAvailableZoom = await _controller.getMinZoomLevel();
+      _maxAvailableZoom = await _controller.getMaxZoomLevel();
+      setState(() {});
+    });
   }
 
   @override
@@ -44,7 +53,25 @@ class _CameraScreenState extends State<CameraScreen> {
             return Stack(
               children: [
                 // 相机预览
-                CameraPreview(_controller),
+                GestureDetector(
+                  onScaleStart: (details) {
+                    _baseZoom = _currentZoom;
+                  },
+                  onScaleUpdate: (details) {
+                    double newZoom = (_baseZoom * details.scale)
+                        .clamp(_minAvailableZoom, _maxAvailableZoom);
+                    _controller.setZoomLevel(newZoom);
+                    setState(() {
+                      _currentZoom = newZoom;
+                    });
+                  },
+                  child: SizedBox.expand(
+                    child: AspectRatio(
+                      aspectRatio: 1 / _controller.value.aspectRatio,
+                      child: CameraPreview(_controller),
+                    ),
+                  ),
+                ),
 
                 // 拍摄建议气泡
                 if (_showingTips) const ShootingTips(),
