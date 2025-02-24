@@ -5,6 +5,8 @@ import '../providers/camera_provider.dart';
 import '../widgets/shooting_tips.dart';
 import '../widgets/camera_controls.dart';
 import 'package:image_gallery_saver/image_gallery_saver.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'dart:io';
 
 class CameraScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
@@ -97,14 +99,46 @@ class _CameraScreenState extends State<CameraScreen> {
     );
   }
 
+  Future<String> _compressImage(String imagePath) async {
+    final file = File(imagePath);
+    final targetPath = imagePath.replaceAll('.jpg', '_compressed.jpg');
+    
+    final result = await FlutterImageCompress.compressAndGetFile(
+      file.absolute.path,
+      targetPath,
+      quality: 85,
+      minWidth: 1024,
+      minHeight: 1024,
+      // 设置最大字节为1MB
+      keepExif: false,
+    );
+    
+    if (result == null) return imagePath;
+    
+    // 检查压缩后的文件大小
+    final compressedSize = await result.length();
+    if (compressedSize > 1024 * 1024) {
+      // 如果仍然超过1MB，递归压缩，降低质量
+      await File(result.path).delete();
+      return _compressImage(imagePath);
+    }
+    
+    // 删除原始文件
+    await file.delete();
+    return result.path;
+  }
+
   void _handleTeachPress() async {
     final cameraProvider = context.read<CameraProvider>();
 
     // 获取当前预览图像
     final image = await _controller.takePicture();
+    
+    // 压缩图片
+    final compressedImagePath = await _compressImage(image.path);
 
     // 调用AI分析获取建议
-    await cameraProvider.analyzeImage(image.path);
+    await cameraProvider.analyzeImage(compressedImagePath);
 
     setState(() {
       _showingTips = true;
@@ -115,6 +149,9 @@ class _CameraScreenState extends State<CameraScreen> {
     try {
       await _initializeControllerFuture;
       final image = await _controller.takePicture();
+      
+      // 压缩图片
+      final compressedImagePath = await _compressImage(image.path);
 
       // 保存到相册
       if (context.mounted) {
@@ -139,7 +176,7 @@ class _CameraScreenState extends State<CameraScreen> {
 
         if (save == true) {
           // 保存照片到相册
-          final result = await ImageGallerySaver.saveFile(image.path);
+          final result = await ImageGallerySaver.saveFile(compressedImagePath);
           if (context.mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
