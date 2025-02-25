@@ -1,15 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../providers/camera_provider.dart';
 
 class CameraControls extends StatelessWidget {
   final VoidCallback onTeachPress;
   final VoidCallback onCapturePress;
+  final VoidCallback onGalleryPress;
+  final VoidCallback onSwitchCameraPress;
   final bool showingTips;
 
   const CameraControls({
     super.key,
     required this.onTeachPress,
     required this.onCapturePress,
-    required this.showingTips,
+    required this.onGalleryPress,
+    required this.onSwitchCameraPress,
+    this.showingTips = false,
   });
 
   @override
@@ -34,11 +40,7 @@ class CameraControls extends StatelessWidget {
                 padding: const EdgeInsets.only(bottom: 20),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _buildModeOption('照片', true),
-                    const SizedBox(width: 24),
-                    _buildModeOption('视频', false),
-                  ],
+                  children: [_buildModeOption('照片', true)],
                 ),
               ),
 
@@ -53,13 +55,11 @@ class CameraControls extends StatelessWidget {
                     color: Colors.white,
                     size: 28,
                   ),
-                  onPressed: () {
-                    // 这里可以添加打开相册的功能
-                  },
+                  onPressed: onGalleryPress,
                 ),
 
                 // 中间按钮 - 拍照/教我拍
-                _buildCaptureButton(),
+                _buildCaptureButton(showingTips),
 
                 // 右侧按钮 - 切换相机
                 IconButton(
@@ -68,9 +68,7 @@ class CameraControls extends StatelessWidget {
                     color: Colors.white,
                     size: 28,
                   ),
-                  onPressed: () {
-                    // 这里可以添加切换相机的功能
-                  },
+                  onPressed: onSwitchCameraPress,
                 ),
               ],
             ),
@@ -105,7 +103,7 @@ class CameraControls extends StatelessWidget {
     );
   }
 
-  Widget _buildCaptureButton() {
+  Widget _buildCaptureButton(bool showingTips) {
     return GestureDetector(
       onTap: showingTips ? onCapturePress : onTeachPress,
       child: Container(
@@ -118,21 +116,26 @@ class CameraControls extends StatelessWidget {
               showingTips ? Colors.green.withOpacity(0.3) : Colors.transparent,
         ),
         child: Center(
-          child: Container(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
             width: 60,
             height: 60,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: showingTips ? Colors.green : Colors.white,
             ),
-            child:
-                showingTips
-                    ? const Icon(Icons.check, color: Colors.white, size: 30)
-                    : const Icon(
-                      Icons.camera_alt,
-                      color: Colors.black,
-                      size: 30,
+            child: Center(
+              child: showingTips
+                  ? const Icon(Icons.check, color: Colors.white, size: 30)
+                  : const Text(
+                      '教我拍',
+                      style: TextStyle(
+                        color: Colors.black,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
+            ),
           ),
         ),
       ),

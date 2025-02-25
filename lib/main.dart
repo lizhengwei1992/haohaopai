@@ -1,25 +1,32 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:camera/camera.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-import 'screens/camera_screen.dart';
+import 'screens/awesome_camera_screen.dart';
 import 'providers/camera_provider.dart';
-
-List<CameraDescription> cameras = [];
+import 'providers/settings_provider.dart';
+import 'utils/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 获取相机列表
-  cameras = await availableCameras();
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
 
-  // 请求相机权限
-  await Permission.camera.request();
+  final cameraStatus = await Permission.camera.request();
+  if (cameraStatus.isDenied) {
+    debugPrint('相机权限被拒绝');
+  }
 
   runApp(
     MultiProvider(
-      providers: [ChangeNotifierProvider(create: (_) => CameraProvider())],
+      providers: [
+        ChangeNotifierProvider(create: (_) => CameraProvider()),
+        ChangeNotifierProvider(create: (_) => SettingsProvider()),
+      ],
       child: const MyApp(),
     ),
   );
@@ -31,12 +38,10 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'AI 拍照助手',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-        visualDensity: VisualDensity.adaptivePlatformDensity,
-      ),
-      home: CameraScreen(cameras: cameras),
+      title: '好好拍',
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.lightTheme,
+      home: const AwesomeCameraScreen(),
     );
   }
 }

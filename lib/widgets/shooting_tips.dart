@@ -13,11 +13,42 @@ class ShootingTips extends StatelessWidget {
         final tips = provider.tips;
 
         return Positioned(
-          top: 100,
-          right: 20,
+          top: MediaQuery.of(context).padding.top + 60,
+          left: 0,
+          right: 0,
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: tips.map((tip) => _TipBubble(tip: tip)).toList(),
+            children: [
+              // 提示标题
+              const Padding(
+                padding: EdgeInsets.only(bottom: 16.0),
+                child: Text(
+                  '拍摄建议',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    shadows: [
+                      Shadow(
+                        offset: Offset(1, 1),
+                        blurRadius: 3,
+                        color: Colors.black45,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              // 提示列表
+              SizedBox(
+                height: 200,
+                child: PageView.builder(
+                  itemCount: tips.length,
+                  controller: PageController(viewportFraction: 0.9),
+                  itemBuilder: (context, index) {
+                    return _TipCard(tip: tips[index]);
+                  },
+                ),
+              ),
+            ],
           ),
         );
       },
@@ -25,16 +56,17 @@ class ShootingTips extends StatelessWidget {
   }
 }
 
-class _TipBubble extends StatefulWidget {
+class _TipCard extends StatefulWidget {
   final ShootingTip tip;
 
-  const _TipBubble({required this.tip});
+  const _TipCard({required this.tip});
 
   @override
-  State<_TipBubble> createState() => _TipBubbleState();
+  State<_TipCard> createState() => _TipCardState();
 }
 
-class _TipBubbleState extends State<_TipBubble> with SingleTickerProviderStateMixin {
+class _TipCardState extends State<_TipCard>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final Animation<double> _animation;
 
@@ -42,12 +74,12 @@ class _TipBubbleState extends State<_TipBubble> with SingleTickerProviderStateMi
   void initState() {
     super.initState();
     _controller = AnimationController(
-      duration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 500),
       vsync: this,
     );
     _animation = CurvedAnimation(
       parent: _controller,
-      curve: Curves.easeOut,
+      curve: Curves.easeOutBack,
     );
     _controller.forward();
   }
@@ -64,75 +96,77 @@ class _TipBubbleState extends State<_TipBubble> with SingleTickerProviderStateMi
       opacity: _animation,
       child: SlideTransition(
         position: Tween<Offset>(
-          begin: const Offset(0.3, 0),
+          begin: const Offset(0, 0.3),
           end: Offset.zero,
         ).animate(_animation),
-        child: Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Colors.black.withOpacity(0.8),
-                Colors.black.withOpacity(0.6),
-              ],
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8.0),
+          child: Card(
+            elevation: 8,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
             ),
-            borderRadius: BorderRadius.circular(24),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.2),
-                blurRadius: 8,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [Colors.blue, Colors.lightBlue],
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      _getIconForType(widget.tip.type),
-                      color: Colors.white,
-                      size: 14,
+            color: Colors.black.withOpacity(0.7),
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // 提示类型标签
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
                     ),
-                    const SizedBox(width: 4),
-                    Text(
-                      widget.tip.type,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: _getGradientColors(widget.tip.type),
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
                       ),
+                      borderRadius: BorderRadius.circular(20),
                     ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              Flexible(
-                child: Text(
-                  widget.tip.text,
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.9),
-                    fontSize: 14,
-                    height: 1.4,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _getIconForType(widget.tip.type),
+                          color: Colors.white,
+                          size: 16,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          widget.tip.type,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
+                  const SizedBox(height: 16),
+                  // 提示内容
+                  Text(
+                    widget.tip.text,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      height: 1.5,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  // 底部提示
+                  const Center(
+                    child: Text(
+                      '左右滑动查看更多建议',
+                      style: TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
@@ -149,8 +183,27 @@ class _TipBubbleState extends State<_TipBubble> with SingleTickerProviderStateMi
         return Icons.rotate_right;
       case '焦点':
         return Icons.center_focus_strong;
+      case '动作':
+        return Icons.directions_run;
       default:
         return Icons.photo_camera;
+    }
+  }
+
+  List<Color> _getGradientColors(String type) {
+    switch (type) {
+      case '构图':
+        return [Colors.blue, Colors.lightBlue];
+      case '光线':
+        return [Colors.orange, Colors.amber];
+      case '角度':
+        return [Colors.purple, Colors.deepPurple];
+      case '焦点':
+        return [Colors.green, Colors.lightGreen];
+      case '动作':
+        return [Colors.red, Colors.redAccent];
+      default:
+        return [Colors.blueGrey, Colors.grey];
     }
   }
 }
