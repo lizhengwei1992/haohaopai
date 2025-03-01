@@ -25,13 +25,12 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.2
-  camera: ^0.10.5+5
   provider: ^6.1.1
   permission_handler: ^11.1.0
   image_gallery_saver: ^2.0.3
   flutter_image_compress: ^2.1.0
   dio: ^5.4.0
-  camerawesome: ^2.1.0
+  camera: ^0.11.1
   shared_preferences: ^2.2.2
   path_provider: ^2.1.2
 

@@ -1,9 +1,6 @@
 PODS:
   - camera_avfoundation (0.0.1):
     - Flutter
-  - camerawesome (0.0.1):
-    - Flutter
-    - JPSVolumeButtonHandler
   - Flutter (1.0.0)
   - flutter_image_compress_common (1.0.0):
     - Flutter
@@ -12,7 +9,6 @@ PODS:
     - SDWebImageWebPCoder
   - image_gallery_saver (2.0.2):
     - Flutter
-  - JPSVolumeButtonHandler (1.0.5)
   - libwebp (1.5.0):
     - libwebp/demux (= 1.5.0)
     - libwebp/mux (= 1.5.0)
@@ -45,7 +41,6 @@ PODS:
 
 DEPENDENCIES:
   - camera_avfoundation (from `.symlinks/plugins/camera_avfoundation/ios`)
-  - camerawesome (from `.symlinks/plugins/camerawesome/ios`)
   - Flutter (from `Flutter`)
   - flutter_image_compress_common (from `.symlinks/plugins/flutter_image_compress_common/ios`)
   - image_gallery_saver (from `.symlinks/plugins/image_gallery_saver/ios`)
@@ -55,7 +50,6 @@ DEPENDENCIES:
 
 SPEC REPOS:
   trunk:
-    - JPSVolumeButtonHandler
     - libwebp
     - Mantle
     - SDWebImage
@@ -64,8 +58,6 @@ SPEC REPOS:
 EXTERNAL SOURCES:
   camera_avfoundation:
     :path: ".symlinks/plugins/camera_avfoundation/ios"
-  camerawesome:
-    :path: ".symlinks/plugins/camerawesome/ios"
   Flutter:
     :path: Flutter
   flutter_image_compress_common:
@@ -81,11 +73,9 @@ EXTERNAL SOURCES:
 
 SPEC CHECKSUMS:
   camera_avfoundation: 04b44aeb14070126c6529e5ab82cc7c9fca107cf
-  camerawesome: ae69de297ab1a69a0bcaeef8797d3045ed57172f
   Flutter: e0871f40cf51350855a761d2e70bf5af5b9b5de7
   flutter_image_compress_common: 1697a328fd72bfb335507c6bca1a65fa5ad87df1
   image_gallery_saver: 14711d79da40581063e8842a11acf1969d781ed7
-  JPSVolumeButtonHandler: 53110330c9168ed325def93eabff39f0fe3e8082
   libwebp: 02b23773aedb6ff1fd38cec7a77b81414c6842a8
   Mantle: c5aa8794a29a022dfbbfc9799af95f477a69b62d
   path_provider_foundation: 080d55be775b7414fd5a5ef3ac137b97b097e564

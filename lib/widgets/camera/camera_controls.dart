@@ -34,34 +34,21 @@ class CameraControls extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
-            // 模式选择器
-            if (!showingTips)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 20),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [_buildModeOption('照片', true)],
-                ),
-              ),
+            // // 模式选择器
+            // if (!showingTips)
+            //   Padding(
+            //     padding: const EdgeInsets.only(bottom: 20),
+            //     child: Row(
+            //       mainAxisAlignment: MainAxisAlignment.center,
+            //       children: [_buildModeOption('照片', true)],
+            //     ),
+            //   ),
 
             // 底部控制栏
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                // 左侧按钮 - 相册
-                IconButton(
-                  icon: const Icon(
-                    Icons.photo_library,
-                    color: Colors.white,
-                    size: 28,
-                  ),
-                  onPressed: onGalleryPress,
-                ),
-
-                // 中间按钮 - 拍照/教我拍
-                _buildCaptureButton(showingTips),
-
-                // 右侧按钮 - 切换相机
+                // 左侧按钮 - 切换相机
                 IconButton(
                   icon: const Icon(
                     Icons.flip_camera_ios,
@@ -69,6 +56,19 @@ class CameraControls extends StatelessWidget {
                     size: 28,
                   ),
                   onPressed: onSwitchCameraPress,
+                ),
+
+                // 中间按钮 - 拍照/教我拍
+                _buildCaptureButton(showingTips),
+
+                // 右侧按钮 - 相册
+                IconButton(
+                  icon: const Icon(
+                    Icons.photo_library,
+                    color: Colors.white,
+                    size: 28,
+                  ),
+                  onPressed: onGalleryPress,
                 ),
               ],
             ),

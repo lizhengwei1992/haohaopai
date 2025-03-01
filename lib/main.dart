@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-import 'screens/awesome_camera_screen.dart';
+import 'screens/camera_screen.dart';
 import 'providers/camera_provider.dart';
 import 'providers/settings_provider.dart';
 import 'utils/app_theme.dart';
@@ -41,7 +41,7 @@ class MyApp extends StatelessWidget {
       title: '好好拍',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
-      home: const AwesomeCameraScreen(),
+      home: const CameraScreen(),
     );
   }
 }
