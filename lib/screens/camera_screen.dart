@@ -3,7 +3,12 @@ import 'package:camera/camera.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'package:path/path.dart' as path;
+import 'package:provider/provider.dart';
 import 'settings/settings_screen.dart';
+import '../providers/camera_provider.dart';
+import '../widgets/camera/shooting_tips.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:image/image.dart' as img;
 
 class CameraScreen extends StatefulWidget {
   const CameraScreen({super.key});
@@ -62,9 +67,9 @@ class _CameraScreenState extends State<CameraScreen>
 
       final CameraController cameraController = CameraController(
         _cameras[0],
-        ResolutionPreset.high,
+        ResolutionPreset.max,
         enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.jpeg,
+        imageFormatGroup: ImageFormatGroup.yuv420,
       );
 
       _controller = cameraController;
@@ -141,6 +146,10 @@ class _CameraScreenState extends State<CameraScreen>
         ),
       );
     }
+
+    final cameraProvider = Provider.of<CameraProvider>(context);
+    final showingTips = cameraProvider.state == CameraState.showingTips;
+    final analyzing = cameraProvider.state == CameraState.analyzing;
 
     return Scaffold(
       body: Stack(
@@ -230,6 +239,9 @@ class _CameraScreenState extends State<CameraScreen>
             ),
           ),
 
+          // 拍摄建议
+          if (showingTips) const ShootingTips(),
+
           // 底部操作栏
           Positioned(
             bottom: 0,
@@ -254,7 +266,9 @@ class _CameraScreenState extends State<CameraScreen>
                         mainAxisAlignment: MainAxisAlignment.spaceAround,
                         children: [
                           GestureDetector(
-                            onTap: _takePhoto,
+                            onTap: () => showingTips
+                                ? _handleCapturePress(context)
+                                : _handleTeachPress(context),
                             child: Container(
                               width: 70,
                               height: 70,
@@ -273,10 +287,10 @@ class _CameraScreenState extends State<CameraScreen>
                                     shape: BoxShape.circle,
                                     color: Colors.white,
                                   ),
-                                  child: const Center(
+                                  child: Center(
                                     child: Text(
-                                      '教我拍',
-                                      style: TextStyle(
+                                      showingTips ? '拍摄' : '教我拍',
+                                      style: const TextStyle(
                                         color: Colors.black,
                                         fontSize: 14,
                                         fontWeight: FontWeight.bold,
@@ -305,8 +319,204 @@ class _CameraScreenState extends State<CameraScreen>
               ),
             ),
           ),
+
+          // 加载指示器
+          if (analyzing)
+            Container(
+              color: Colors.black54,
+              child: const Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(color: Colors.white),
+                    SizedBox(height: 16),
+                    Text(
+                      '正在分析...',
+                      style: TextStyle(color: Colors.white, fontSize: 16),
+                    ),
+                  ],
+                ),
+              ),
+            ),
         ],
       ),
     );
+  }
+
+  // 处理"拍摄"按钮点击
+  Future<void> _handleCapturePress(BuildContext context) async {
+    if (_controller == null || !_controller!.value.isInitialized) {
+      return;
+    }
+
+    final cameraProvider = Provider.of<CameraProvider>(context, listen: false);
+    final showingTips = cameraProvider.state == CameraState.showingTips;
+    String originalPath;
+
+    try {
+      if (showingTips && cameraProvider.originalPhotoPath != null) {
+        // 如果正在显示拍摄建议，使用之前保存的原始照片路径
+        originalPath = cameraProvider.originalPhotoPath!;
+      } else {
+        // 否则拍摄新照片
+        final XFile photo = await _controller!.takePicture();
+        originalPath = photo.path;
+      }
+
+      // 直接将原始图像数据保存为PNG格式
+      final String pngPath = await _saveAsPng(originalPath);
+
+      // 询问是否保存到相册
+      if (mounted) {
+        final save = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('保存照片'),
+            content: const Text('是否保存到相册?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('取消'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('保存'),
+              ),
+            ],
+          ),
+        );
+
+        if (save == true) {
+          // 保存PNG格式照片到相册
+          final success = await cameraProvider.saveToGallery(pngPath);
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(success ? '照片已保存到相册' : '保存失败')),
+            );
+          }
+
+          // 如果创建了临时PNG文件，删除它
+          if (pngPath != originalPath) {
+            await File(pngPath).delete().catchError((e) {
+              debugPrint('删除临时PNG文件出错: $e');
+            });
+          }
+        }
+
+        // 重置状态
+        cameraProvider.reset();
+      }
+
+      debugPrint('照片已保存: $pngPath');
+    } catch (e) {
+      debugPrint('拍照错误: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('拍照出错，请重试')),
+      );
+    }
+  }
+
+  // 直接将原始图像数据保存为PNG格式
+  Future<String> _saveAsPng(String imagePath) async {
+    try {
+      final File imageFile = File(imagePath);
+      final Directory tempDir = await getTemporaryDirectory();
+      final String pngPath =
+          '${tempDir.path}/photo_${DateTime.now().millisecondsSinceEpoch}.png';
+
+      // 读取原始图像数据
+      final bytes = await imageFile.readAsBytes();
+
+      // 使用image包解码图像
+      final img.Image? image = img.decodeImage(bytes);
+
+      if (image != null) {
+        // 直接编码为PNG格式并保存
+        final pngBytes = img.encodePng(image);
+        final pngFile = File(pngPath);
+        await pngFile.writeAsBytes(pngBytes);
+        return pngPath;
+      }
+
+      return imagePath;
+    } catch (e) {
+      debugPrint('保存PNG格式出错: $e');
+      return imagePath;
+    }
+  }
+
+  // 处理"教我拍"按钮点击
+  Future<void> _handleTeachPress(BuildContext context) async {
+    if (_controller == null || !_controller!.value.isInitialized) {
+      return;
+    }
+
+    final cameraProvider = Provider.of<CameraProvider>(context, listen: false);
+
+    try {
+      // 拍照
+      final XFile photo = await _controller!.takePicture();
+
+      // 直接将原始图像数据保存为PNG格式
+      final String pngPath = await _saveAsPng(photo.path);
+
+      // 保存原始照片路径，以便后续使用
+      cameraProvider.setOriginalPhotoPath(pngPath);
+
+      // 压缩照片用于AI分析，减少传输时间
+      final compressedPath = await _compressImageForAnalysis(pngPath);
+
+      // 分析照片
+      await cameraProvider.analyzeImage(compressedPath);
+
+      // 分析完成后删除临时压缩文件
+      if (compressedPath != pngPath) {
+        await File(compressedPath).delete().catchError((e) {
+          debugPrint('删除临时压缩文件出错: $e');
+        });
+      }
+
+      debugPrint('照片已分析: $pngPath');
+    } catch (e) {
+      debugPrint('教我拍照错误: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('无法分析照片，请重试')),
+      );
+    }
+  }
+
+  // 压缩图像用于AI分析
+  Future<String> _compressImageForAnalysis(String imagePath,
+      {int quality = 70}) async {
+    try {
+      final file = File(imagePath);
+      final dir = await getTemporaryDirectory();
+      final targetPath =
+          '${dir.path}/analysis_${DateTime.now().millisecondsSinceEpoch}.jpg';
+
+      final result = await FlutterImageCompress.compressAndGetFile(
+        file.absolute.path,
+        targetPath,
+        quality: quality,
+        minWidth: 1024,
+        minHeight: 1024,
+      );
+
+      if (result == null) return imagePath;
+
+      // 检查压缩后的文件大小
+      final compressedSize = await result.length();
+      if (compressedSize > 1024 * 1024 && quality > 50) {
+        // 如果仍然超过1MB，递归压缩，降低质量
+        await File(result.path).delete();
+        return _compressImageForAnalysis(imagePath, quality: quality - 10);
+      }
+
+      return result.path;
+    } catch (e) {
+      debugPrint('压缩图像出错: $e');
+      return imagePath;
+    }
   }
 }

@@ -32,6 +32,10 @@ class CameraProvider with ChangeNotifier {
   String? _currentPhotoPath;
   String? get currentPhotoPath => _currentPhotoPath;
 
+  // 原始照片路径（用于高质量保存）
+  String? _originalPhotoPath;
+  String? get originalPhotoPath => _originalPhotoPath;
+
   // 最近拍摄的照片元数据
   final List<PhotoMetadata> _recentPhotos = [];
   List<PhotoMetadata> get recentPhotos => _recentPhotos;
@@ -46,26 +50,24 @@ class CameraProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  // 设置原始照片路径
+  void setOriginalPhotoPath(String path) {
+    _originalPhotoPath = path;
+    notifyListeners();
+  }
+
   // 分析图像并获取拍摄建议
   Future<void> analyzeImage(String imagePath) async {
     try {
       _setState(CameraState.analyzing);
       _currentPhotoPath = imagePath;
 
-      // 压缩图像以加快上传速度
-      final compressedPath = await _compressImageForAnalysis(imagePath);
-
       // 调用AI分析服务
-      final tips = await _imageAnalysisService.analyzeImage(compressedPath);
+      final tips = await _imageAnalysisService.analyzeImage(imagePath);
 
       // 更新建议列表
       _tips.clear();
       _tips.addAll(tips);
-
-      // 删除临时压缩文件
-      if (compressedPath != imagePath) {
-        await File(compressedPath).delete();
-      }
 
       _setState(CameraState.showingTips);
     } catch (e) {
@@ -75,67 +77,12 @@ class CameraProvider with ChangeNotifier {
     }
   }
 
-  // 压缩图像用于分析
-  Future<String> _compressImageForAnalysis(String imagePath) async {
-    try {
-      final file = File(imagePath);
-      final dir = await getTemporaryDirectory();
-      final targetPath =
-          '${dir.path}/analysis_${DateTime.now().millisecondsSinceEpoch}.jpg';
-
-      final result = await FlutterImageCompress.compressAndGetFile(
-        file.absolute.path,
-        targetPath,
-        quality: 70,
-        minWidth: 1024,
-        minHeight: 1024,
-      );
-
-      return result?.path ?? imagePath;
-    } catch (e) {
-      debugPrint('压缩图像出错: $e');
-      return imagePath;
-    }
-  }
-
-  // 压缩图像用于保存
-  Future<String> compressImageForSaving(String imagePath, int quality) async {
-    try {
-      final file = File(imagePath);
-      final dir = await getTemporaryDirectory();
-      final targetPath =
-          '${dir.path}/compressed_${DateTime.now().millisecondsSinceEpoch}.jpg';
-
-      final result = await FlutterImageCompress.compressAndGetFile(
-        file.absolute.path,
-        targetPath,
-        quality: quality,
-        minWidth: 1920,
-        minHeight: 1920,
-      );
-
-      if (result == null) return imagePath;
-
-      // 检查压缩后的文件大小
-      final compressedSize = await result.length();
-      if (compressedSize > 1024 * 1024) {
-        // 如果仍然超过1MB，递归压缩，降低质量
-        await File(result.path).delete();
-        return compressImageForSaving(imagePath, quality - 5);
-      }
-
-      return result.path;
-    } catch (e) {
-      debugPrint('压缩图像出错: $e');
-      return imagePath;
-    }
-  }
-
   // 保存照片到相册
   Future<bool> saveToGallery(String imagePath) async {
     try {
       _setState(CameraState.saving);
 
+      // 直接保存原始图片，不进行压缩
       final result = await ImageGallerySaver.saveFile(imagePath);
       final success = result['isSuccess'] == true;
 
@@ -173,6 +120,7 @@ class CameraProvider with ChangeNotifier {
     _state = CameraState.initial;
     _tips.clear();
     _currentPhotoPath = null;
+    _originalPhotoPath = null;
     _errorMessage = '';
     notifyListeners();
   }

@@ -38,13 +38,13 @@ class SettingsScreen extends StatelessWidget {
                   },
                   items:
                       <String>['自动', '开启', '关闭'].map<DropdownMenuItem<String>>((
-                        String value,
-                      ) {
-                        return DropdownMenuItem<String>(
-                          value: value,
-                          child: Text(value),
-                        );
-                      }).toList(),
+                    String value,
+                  ) {
+                    return DropdownMenuItem<String>(
+                      value: value,
+                      child: Text(value),
+                    );
+                  }).toList(),
                 ),
               ),
 
@@ -57,24 +57,6 @@ class SettingsScreen extends StatelessWidget {
                 value: settings.saveToGallery,
                 onChanged: (value) => settings.setSaveToGallery(value),
                 activeColor: AppTheme.primaryColor,
-              ),
-
-              // 图片质量滑块
-              ListTile(
-                title: const Text('图片质量'),
-                subtitle: Text('${settings.imageQuality}%'),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                child: Slider(
-                  value: settings.imageQuality.toDouble(),
-                  min: 50,
-                  max: 100,
-                  divisions: 10,
-                  label: '${settings.imageQuality}%',
-                  onChanged: (value) => settings.setImageQuality(value.round()),
-                  activeColor: AppTheme.primaryColor,
-                ),
               ),
 
               _buildSectionHeader(context, '位置信息'),
@@ -97,21 +79,20 @@ class SettingsScreen extends StatelessWidget {
                   onPressed: () async {
                     final confirm = await showDialog<bool>(
                       context: context,
-                      builder:
-                          (context) => AlertDialog(
-                            title: const Text('重置设置'),
-                            content: const Text('确定要将所有设置恢复为默认值吗？'),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(context, false),
-                                child: const Text('取消'),
-                              ),
-                              TextButton(
-                                onPressed: () => Navigator.pop(context, true),
-                                child: const Text('确定'),
-                              ),
-                            ],
+                      builder: (context) => AlertDialog(
+                        title: const Text('重置设置'),
+                        content: const Text('确定要将所有设置恢复为默认值吗？'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, false),
+                            child: const Text('取消'),
                           ),
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, true),
+                            child: const Text('确定'),
+                          ),
+                        ],
+                      ),
                     );
 
                     if (confirm == true) {

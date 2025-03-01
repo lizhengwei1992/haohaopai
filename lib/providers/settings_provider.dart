@@ -6,13 +6,11 @@ class SettingsProvider with ChangeNotifier {
   bool _saveToGallery = true;
   bool _showGridLines = true;
   bool _enableLocation = false;
-  int _imageQuality = 85; // 图片压缩质量 (0-100)
 
   // Getters
   bool get saveToGallery => _saveToGallery;
   bool get showGridLines => _showGridLines;
   bool get enableLocation => _enableLocation;
-  int get imageQuality => _imageQuality;
 
   // 构造函数 - 加载保存的设置
   SettingsProvider() {
@@ -27,7 +25,6 @@ class SettingsProvider with ChangeNotifier {
       _saveToGallery = prefs.getBool('saveToGallery') ?? true;
       _showGridLines = prefs.getBool('showGridLines') ?? true;
       _enableLocation = prefs.getBool('enableLocation') ?? false;
-      _imageQuality = prefs.getInt('imageQuality') ?? 85;
 
       notifyListeners();
     } catch (e) {
@@ -43,7 +40,6 @@ class SettingsProvider with ChangeNotifier {
       await prefs.setBool('saveToGallery', _saveToGallery);
       await prefs.setBool('showGridLines', _showGridLines);
       await prefs.setBool('enableLocation', _enableLocation);
-      await prefs.setInt('imageQuality', _imageQuality);
     } catch (e) {
       debugPrint('保存设置出错: $e');
     }
@@ -68,20 +64,11 @@ class SettingsProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  void setImageQuality(int value) {
-    if (value >= 0 && value <= 100) {
-      _imageQuality = value;
-      _saveSettings();
-      notifyListeners();
-    }
-  }
-
   // 重置所有设置为默认值
   Future<void> resetSettings() async {
     _saveToGallery = true;
     _showGridLines = true;
     _enableLocation = false;
-    _imageQuality = 85;
 
     await _saveSettings();
     notifyListeners();
