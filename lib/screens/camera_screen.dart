@@ -6,7 +6,9 @@ import 'package:path/path.dart' as path;
 import 'package:provider/provider.dart';
 import 'settings/settings_screen.dart';
 import '../providers/camera_provider.dart';
+import '../providers/settings_provider.dart';
 import '../widgets/camera/shooting_tips.dart';
+import '../widgets/camera/camera_grid_lines.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:image/image.dart' as img;
 import '../models/photo_metadata.dart';
@@ -176,8 +178,11 @@ class _CameraScreenState extends State<CameraScreen>
     }
 
     final cameraProvider = Provider.of<CameraProvider>(context);
+    final settingsProvider = Provider.of<SettingsProvider>(context);
     final showingTips = cameraProvider.state == CameraState.showingTips;
     final analyzing = cameraProvider.state == CameraState.analyzing;
+    final showGridLines = (settingsProvider.showGridLines && !showingTips) ||
+        (cameraProvider.state == CameraState.showingTips);
 
     return Scaffold(
       body: Stack(
@@ -194,11 +199,9 @@ class _CameraScreenState extends State<CameraScreen>
                     height: _controller!.value.previewSize!.width,
                     child: GestureDetector(
                       onScaleStart: (details) {
-                        // 记录缩放开始时的缩放级别
                         _baseScaleLevel = _currentZoomLevel;
                       },
                       onScaleUpdate: (details) {
-                        // 根据手势缩放比例更新相机缩放级别
                         if (details.scale != 1.0) {
                           double newZoomLevel =
                               (_baseScaleLevel * details.scale)
@@ -213,6 +216,12 @@ class _CameraScreenState extends State<CameraScreen>
               ),
             ),
           ),
+
+          // 相机网格线
+          if (showGridLines)
+            Positioned.fill(
+              child: CameraGridLines(showGrid: true),
+            ),
 
           // 顶部操作栏
           Positioned(

@@ -18,8 +18,8 @@ class SettingsScreen extends StatelessWidget {
 
               // 网格线开关
               SwitchListTile(
-                title: const Text('显示网格线'),
-                subtitle: const Text('拍照时显示九宫格辅助线'),
+                title: const Text('默认打开网格线'),
+                subtitle: const Text('每次打开相机时自动显示网格线'),
                 value: settings.showGridLines,
                 onChanged: (value) => settings.setShowGridLines(value),
                 activeColor: AppTheme.primaryColor,

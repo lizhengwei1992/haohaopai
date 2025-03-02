@@ -4,7 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class SettingsProvider with ChangeNotifier {
   // 默认设置
   bool _saveToGallery = true;
-  bool _showGridLines = true;
+  bool _showGridLines = false;
   bool _enableLocation = false;
 
   // Getters
@@ -23,7 +23,7 @@ class SettingsProvider with ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
 
       _saveToGallery = prefs.getBool('saveToGallery') ?? true;
-      _showGridLines = prefs.getBool('showGridLines') ?? true;
+      _showGridLines = prefs.getBool('showGridLines') ?? false;
       _enableLocation = prefs.getBool('enableLocation') ?? false;
 
       notifyListeners();
@@ -67,7 +67,7 @@ class SettingsProvider with ChangeNotifier {
   // 重置所有设置为默认值
   Future<void> resetSettings() async {
     _saveToGallery = true;
-    _showGridLines = true;
+    _showGridLines = false;
     _enableLocation = false;
 
     await _saveSettings();

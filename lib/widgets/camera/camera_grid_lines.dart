@@ -18,11 +18,10 @@ class CameraGridLines extends StatelessWidget {
 class _GridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    final paint =
-        Paint()
-          ..color = Colors.white.withOpacity(0.5)
-          ..strokeWidth = 1.0
-          ..style = PaintingStyle.stroke;
+    final paint = Paint()
+      ..color = Colors.white.withOpacity(0.3)
+      ..strokeWidth = 0.8
+      ..style = PaintingStyle.stroke;
 
     // 计算网格线位置
     final width = size.width;
@@ -55,22 +54,21 @@ class _GridPainter extends CustomPainter {
     );
 
     // 绘制交点圆圈
-    final circlePaint =
-        Paint()
-          ..color = Colors.white.withOpacity(0.7)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.5;
+    final circlePaint = Paint()
+      ..color = Colors.white.withOpacity(0.4)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
 
     // 左上交点
-    canvas.drawCircle(Offset(verticalStep, horizontalStep), 5, circlePaint);
+    canvas.drawCircle(Offset(verticalStep, horizontalStep), 4, circlePaint);
     // 中上交点
-    canvas.drawCircle(Offset(verticalStep * 2, horizontalStep), 5, circlePaint);
+    canvas.drawCircle(Offset(verticalStep * 2, horizontalStep), 4, circlePaint);
     // 左中交点
-    canvas.drawCircle(Offset(verticalStep, horizontalStep * 2), 5, circlePaint);
+    canvas.drawCircle(Offset(verticalStep, horizontalStep * 2), 4, circlePaint);
     // 右中交点
     canvas.drawCircle(
       Offset(verticalStep * 2, horizontalStep * 2),
-      5,
+      4,
       circlePaint,
     );
   }
