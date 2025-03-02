@@ -49,42 +49,65 @@ class _FloatingTipBubble extends StatefulWidget {
 }
 
 class _FloatingTipBubbleState extends State<_FloatingTipBubble>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late final AnimationController _controller;
+  late final AnimationController _expandController;
   late final Animation<Offset> _floatAnimation;
-  bool _isPopped = false;
+  late final Animation<double> _expandAnimation;
+  late final Animation<double> _scaleAnimation;
+  bool _isExpanded = false;
+  Offset? _originalPosition;
 
   @override
   void initState() {
     super.initState();
 
+    // 初始化浮动动画控制器
     _controller = AnimationController(
-      duration: const Duration(milliseconds: 5000), // 更长的动画时间
+      duration: const Duration(milliseconds: 3000),
       vsync: this,
     );
 
-    // 随机生成起始和结束位置
+    // 初始化展开动画控制器
+    _expandController = AnimationController(
+      duration: const Duration(milliseconds: 200),
+      vsync: this,
+    );
+
+    // 配置浮动动画
     final random = Random(widget.index);
-    final startX = random.nextDouble() * 0.1 - 0.05; // -0.05到0.05之间
+    final startX = random.nextDouble() * 0.1 - 0.05;
     final startY = random.nextDouble() * 0.1 - 0.05;
     final endX = random.nextDouble() * 0.1 - 0.05;
     final endY = random.nextDouble() * 0.1 - 0.05;
 
-    // 无规则移动动画
     _floatAnimation = Tween<Offset>(
       begin: Offset(startX, startY),
       end: Offset(endX, endY),
     ).animate(
       CurvedAnimation(
         parent: _controller,
-        curve: Curves.easeInOut,
+        curve: Curves.easeInOutQuad,
       ),
     );
 
-    // 启动动画
-    _controller.forward();
+    // 配置展开动画
+    _expandAnimation = Tween<double>(begin: 1.0, end: 1.8).animate(
+      CurvedAnimation(
+        parent: _expandController,
+        curve: Curves.easeInOutQuad,
+      ),
+    );
 
-    // 添加循环动画
+    // 配置缩放动画
+    _scaleAnimation = Tween<double>(begin: 1.0, end: 1.3).animate(
+      CurvedAnimation(
+        parent: _expandController,
+        curve: Curves.easeInOutQuad,
+      ),
+    );
+
+    _controller.forward();
     _controller.addStatusListener((status) {
       if (status == AnimationStatus.completed) {
         _controller.reverse();
@@ -94,26 +117,19 @@ class _FloatingTipBubbleState extends State<_FloatingTipBubble>
     });
   }
 
-  void _popBubble() {
-    if (_isPopped) return;
-    _isPopped = true;
-
-    // 爆炸动画
-    _controller
-      ..removeStatusListener((status) {})
-      ..animateTo(1.5, duration: const Duration(milliseconds: 300)).then((_) {
-        if (mounted) {
-          setState(() {});
-        }
-      });
+  void _toggleExpand() {
+    setState(() {
+      _isExpanded = !_isExpanded;
+      if (_isExpanded) {
+        _expandController.forward();
+      } else {
+        _expandController.reverse();
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isPopped) {
-      return const SizedBox.shrink();
-    }
-
     final screenSize = MediaQuery.of(context).size;
     final bubbleSize = 140.0;
 
@@ -125,6 +141,7 @@ class _FloatingTipBubbleState extends State<_FloatingTipBubble>
       Offset(screenSize.width * 0.65, screenSize.height * 0.45),
     ];
     final position = positions[widget.index % positions.length];
+    _originalPosition ??= position;
 
     // 气泡颜色
     final colors = [
@@ -135,65 +152,106 @@ class _FloatingTipBubbleState extends State<_FloatingTipBubble>
     ];
     final color = colors[widget.index % colors.length];
 
-    return Positioned(
-      left: position.dx,
-      top: position.dy,
-      child: GestureDetector(
-        onTap: _popBubble,
-        child: SlideTransition(
-          position: _floatAnimation,
-          child: Container(
-            width: bubbleSize,
-            height: bubbleSize,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: color,
-              gradient: RadialGradient(
-                colors: [
-                  color.withOpacity(0.9),
-                  color.withOpacity(0.6),
-                ],
-                stops: const [0.5, 1.0],
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: color.withOpacity(0.3),
-                  blurRadius: 10,
-                  spreadRadius: 2,
-                ),
-              ],
+    return Stack(
+      children: [
+        if (_isExpanded)
+          GestureDetector(
+            onTap: _toggleExpand,
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              color: Colors.transparent,
             ),
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(12.0),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      _getIconForType(widget.tip.type),
-                      color: Colors.white,
-                      size: 24,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      widget.tip.text,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
+          ),
+        Positioned(
+          left: _isExpanded
+              ? screenSize.width / 2 - bubbleSize * 0.9
+              : _originalPosition!.dx,
+          top: _isExpanded
+              ? screenSize.height / 2 - bubbleSize * 0.9
+              : _originalPosition!.dy,
+          child: GestureDetector(
+            onTap: _toggleExpand,
+            child: AnimatedBuilder(
+              animation: Listenable.merge([_expandController, _controller]),
+              builder: (context, child) {
+                return Transform.scale(
+                  scale: _scaleAnimation.value,
+                  child: SlideTransition(
+                    position: _isExpanded
+                        ? AlwaysStoppedAnimation(Offset.zero)
+                        : _floatAnimation,
+                    child: Container(
+                      width: bubbleSize * _expandAnimation.value,
+                      height: bubbleSize * _expandAnimation.value,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: color,
+                        gradient: RadialGradient(
+                          colors: [
+                            color.withOpacity(0.9),
+                            color.withOpacity(0.6),
+                          ],
+                          stops: const [0.5, 1.0],
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: color.withOpacity(0.3),
+                            blurRadius: 10,
+                            spreadRadius: 2,
+                          ),
+                        ],
                       ),
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
+                      child: Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(12.0),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Flexible(
+                                child: Icon(
+                                  _getIconForType(widget.tip.type),
+                                  color: Colors.white,
+                                  size: 24 * (_isExpanded ? 1.2 : 1.0),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Flexible(
+                                flex: 2,
+                                child: SingleChildScrollView(
+                                  padding: EdgeInsets.zero,
+                                  child: Text(
+                                    widget.tip.text,
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12 * (_isExpanded ? 1.2 : 1.0),
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    maxLines: _isExpanded ? 6 : 3,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
-                  ],
-                ),
-              ),
+                  ),
+                );
+              },
             ),
           ),
         ),
-      ),
+      ],
     );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _expandController.dispose();
+    super.dispose();
   }
 
   IconData _getIconForType(String type) {
