@@ -32,7 +32,7 @@ class ImageAnalysisService {
       "要求：\n"
       "1. 每个值必须用中文双引号包裹\n"
       "2. 禁止使用Markdown格式\n"
-      "3. 语言精炼，每条意见最多20个字）";
+      "3. 语言精炼，每条意见最多30个字）";
 
   Future<List<ShootingTip>> analyzeImage(String imagePath) async {
     try {

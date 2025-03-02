@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/camera_provider.dart';
 import '../../services/image_analysis_service.dart';
+import 'dart:math';
 
 class ShootingTips extends StatelessWidget {
   const ShootingTips({super.key});
@@ -50,50 +51,40 @@ class _FloatingTipBubble extends StatefulWidget {
 class _FloatingTipBubbleState extends State<_FloatingTipBubble>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
-  late final Animation<double> _scaleAnimation;
-  late final Animation<double> _opacityAnimation;
   late final Animation<Offset> _floatAnimation;
+  bool _isPopped = false;
 
   @override
   void initState() {
     super.initState();
 
-    // 创建动画控制器
     _controller = AnimationController(
-      duration: const Duration(milliseconds: 800),
+      duration: const Duration(milliseconds: 5000), // 更长的动画时间
       vsync: this,
     );
 
-    // 缩放动画
-    _scaleAnimation = CurvedAnimation(
-      parent: _controller,
-      curve: Curves.elasticOut,
+    // 随机生成起始和结束位置
+    final random = Random(widget.index);
+    final startX = random.nextDouble() * 0.1 - 0.05; // -0.05到0.05之间
+    final startY = random.nextDouble() * 0.1 - 0.05;
+    final endX = random.nextDouble() * 0.1 - 0.05;
+    final endY = random.nextDouble() * 0.1 - 0.05;
+
+    // 无规则移动动画
+    _floatAnimation = Tween<Offset>(
+      begin: Offset(startX, startY),
+      end: Offset(endX, endY),
+    ).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: Curves.easeInOut,
+      ),
     );
 
-    // 透明度动画
-    _opacityAnimation = Tween<double>(
-      begin: 0.0,
-      end: 0.9,
-    ).animate(CurvedAnimation(
-      parent: _controller,
-      curve: const Interval(0.0, 0.6, curve: Curves.easeOut),
-    ));
+    // 启动动画
+    _controller.forward();
 
-    // 浮动动画
-    _floatAnimation = Tween<Offset>(
-      begin: const Offset(0, 0),
-      end: const Offset(0, -0.1),
-    ).animate(CurvedAnimation(
-      parent: _controller,
-      curve: Curves.easeInOut,
-    ));
-
-    // 延迟启动动画，错开每个气泡的出现时间
-    Future.delayed(Duration(milliseconds: 150 * widget.index), () {
-      _controller.forward();
-    });
-
-    // 添加重复浮动效果
+    // 添加循环动画
     _controller.addStatusListener((status) {
       if (status == AnimationStatus.completed) {
         _controller.reverse();
@@ -103,104 +94,100 @@ class _FloatingTipBubbleState extends State<_FloatingTipBubble>
     });
   }
 
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
+  void _popBubble() {
+    if (_isPopped) return;
+    _isPopped = true;
+
+    // 爆炸动画
+    _controller
+      ..removeStatusListener((status) {})
+      ..animateTo(1.5, duration: const Duration(milliseconds: 300)).then((_) {
+        if (mounted) {
+          setState(() {});
+        }
+      });
   }
 
   @override
   Widget build(BuildContext context) {
-    // 根据索引计算气泡位置
-    final screenSize = MediaQuery.of(context).size;
-    final bubbleSize = 180.0;
-
-    // 计算气泡位置，使其分布在屏幕不同位置
-    double left;
-    double top;
-
-    // 根据索引确定气泡位置
-    switch (widget.index % 4) {
-      case 0:
-        left = screenSize.width * 0.1;
-        top = screenSize.height * 0.25;
-        break;
-      case 1:
-        left = screenSize.width * 0.6;
-        top = screenSize.height * 0.2;
-        break;
-      case 2:
-        left = screenSize.width * 0.15;
-        top = screenSize.height * 0.5;
-        break;
-      case 3:
-        left = screenSize.width * 0.55;
-        top = screenSize.height * 0.45;
-        break;
-      default:
-        left = screenSize.width * 0.3;
-        top = screenSize.height * 0.3;
+    if (_isPopped) {
+      return const SizedBox.shrink();
     }
 
+    final screenSize = MediaQuery.of(context).size;
+    final bubbleSize = 140.0;
+
+    // 计算气泡位置
+    final positions = [
+      Offset(screenSize.width * 0.2, screenSize.height * 0.2),
+      Offset(screenSize.width * 0.7, screenSize.height * 0.15),
+      Offset(screenSize.width * 0.1, screenSize.height * 0.5),
+      Offset(screenSize.width * 0.65, screenSize.height * 0.45),
+    ];
+    final position = positions[widget.index % positions.length];
+
+    // 气泡颜色
+    final colors = [
+      const Color(0xAAFF6F61),
+      const Color(0xAA6B5B95),
+      const Color(0xAA88B04B),
+      const Color(0xAAF7CAC9),
+    ];
+    final color = colors[widget.index % colors.length];
+
     return Positioned(
-      left: left,
-      top: top,
-      child: SlideTransition(
-        position: _floatAnimation,
-        child: ScaleTransition(
-          scale: _scaleAnimation,
-          child: FadeTransition(
-            opacity: _opacityAnimation,
-            child: Container(
-              width: bubbleSize,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xCC8BC34A), // 透明淡绿色
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.2),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
+      left: position.dx,
+      top: position.dy,
+      child: GestureDetector(
+        onTap: _popBubble,
+        child: SlideTransition(
+          position: _floatAnimation,
+          child: Container(
+            width: bubbleSize,
+            height: bubbleSize,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: color,
+              gradient: RadialGradient(
+                colors: [
+                  color.withOpacity(0.9),
+                  color.withOpacity(0.6),
                 ],
+                stops: const [0.5, 1.0],
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // 提示类型标签
-                  Row(
-                    children: [
-                      Icon(
-                        _getIconForType(widget.tip.type),
-                        color: Colors.white,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        widget.tip.type,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  // 提示内容
-                  Text(
-                    widget.tip.text,
-                    style: const TextStyle(
+              boxShadow: [
+                BoxShadow(
+                  color: color.withOpacity(0.3),
+                  blurRadius: 10,
+                  spreadRadius: 2,
+                ),
+              ],
+            ),
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(12.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _getIconForType(widget.tip.type),
                       color: Colors.white,
-                      fontSize: 13,
-                      height: 1.3,
+                      size: 24,
                     ),
-                    maxLines: 4,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
+                    const SizedBox(height: 8),
+                    Text(
+                      widget.tip.text,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
