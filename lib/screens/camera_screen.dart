@@ -400,8 +400,27 @@ class _CameraScreenState extends State<CameraScreen>
                             ),
                           ),
 
-                          // 右侧占位，保持布局平衡
-                          const SizedBox(width: 50, height: 50),
+                          // 右侧"我的"按钮
+                          GestureDetector(
+                            onTap: () {
+                              Navigator.pushNamed(context, '/profile');
+                            },
+                            child: Container(
+                              width: 50,
+                              height: 50,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border:
+                                    Border.all(color: Colors.white, width: 2),
+                                color: Colors.black.withOpacity(0.3),
+                              ),
+                              child: const Icon(
+                                Icons.person,
+                                color: Colors.white,
+                                size: 24,
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                     ],

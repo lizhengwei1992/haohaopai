@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:image_gallery_saver/image_gallery_saver.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/image_analysis_service.dart';
 import '../models/photo_metadata.dart';
 import 'package:path/path.dart' as path;
@@ -46,8 +47,45 @@ class CameraProvider with ChangeNotifier {
   String _errorMessage = '';
   String get errorMessage => _errorMessage;
 
+  // 教我拍使用次数
+  int _shootingCount = 0;
+  int get shootingCount => _shootingCount;
+
   // 应用相册目录名称
   static const String appAlbumName = 'HaoHaoPai';
+
+  // 构造函数
+  CameraProvider() {
+    _loadShootingCount();
+  }
+
+  // 从SharedPreferences加载拍摄次数
+  Future<void> _loadShootingCount() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _shootingCount = prefs.getInt('shootingCount') ?? 0;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('加载拍摄次数出错: $e');
+    }
+  }
+
+  // 保存拍摄次数到SharedPreferences
+  Future<void> _saveShootingCount() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('shootingCount', _shootingCount);
+    } catch (e) {
+      debugPrint('保存拍摄次数出错: $e');
+    }
+  }
+
+  // 增加拍摄次数
+  void incrementShootingCount() {
+    _shootingCount++;
+    _saveShootingCount();
+    notifyListeners();
+  }
 
   // 更新状态
   void _setState(CameraState newState) {
@@ -73,6 +111,9 @@ class CameraProvider with ChangeNotifier {
       // 更新建议列表
       _tips.clear();
       _tips.addAll(tips);
+
+      // 增加拍摄次数
+      incrementShootingCount();
 
       _setState(CameraState.showingTips);
     } catch (e) {
