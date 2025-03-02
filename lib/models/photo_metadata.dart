@@ -18,6 +18,12 @@ class PhotoMetadata {
   /// 可选的位置描述
   final String? locationName;
 
+  /// 系统相册中的ID
+  final String? systemId;
+
+  /// 是否由应用拍摄
+  final bool isFromApp;
+
   /// 构造函数
   PhotoMetadata({
     required this.path,
@@ -25,6 +31,8 @@ class PhotoMetadata {
     this.latitude,
     this.longitude,
     this.locationName,
+    this.systemId,
+    this.isFromApp = false,
   });
 
   /// 从JSON创建实例
@@ -35,6 +43,8 @@ class PhotoMetadata {
       latitude: json['latitude'] as double?,
       longitude: json['longitude'] as double?,
       locationName: json['locationName'] as String?,
+      systemId: json['systemId'] as String?,
+      isFromApp: json['isFromApp'] as bool? ?? false,
     );
   }
 
@@ -46,6 +56,8 @@ class PhotoMetadata {
       'latitude': latitude,
       'longitude': longitude,
       'locationName': locationName,
+      'systemId': systemId,
+      'isFromApp': isFromApp,
     };
   }
 
@@ -56,6 +68,8 @@ class PhotoMetadata {
     double? latitude,
     double? longitude,
     String? locationName,
+    String? systemId,
+    bool? isFromApp,
   }) {
     return PhotoMetadata(
       path: path ?? this.path,
@@ -63,6 +77,8 @@ class PhotoMetadata {
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
       locationName: locationName ?? this.locationName,
+      systemId: systemId ?? this.systemId,
+      isFromApp: isFromApp ?? this.isFromApp,
     );
   }
 
