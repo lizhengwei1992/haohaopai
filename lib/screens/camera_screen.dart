@@ -218,11 +218,38 @@ class _CameraScreenState extends State<CameraScreen>
     }
   }
 
+  // 处理缩放手势开始
+  void _handleScaleStart(ScaleStartDetails details) {
+    _startScale = _currentZoomLevel;
+    debugPrint('缩放手势开始: $_startScale');
+  }
+
+  // 处理缩放手势更新
+  void _handleScaleUpdate(ScaleUpdateDetails details) {
+    if (details.scale != 1.0) {
+      // 计算新的缩放级别
+      double newZoom = _startScale * details.scale;
+
+      // 限制缩放范围
+      if (newZoom < _minZoomLevel) {
+        newZoom = _minZoomLevel;
+      } else if (newZoom > _maxZoomLevel) {
+        newZoom = _maxZoomLevel;
+      }
+
+      // 设置新的缩放级别
+      _handleZoom(newZoom);
+      debugPrint('缩放手势更新: $newZoom');
+    }
+  }
+
   // 切换到超广角相机
   Future<void> _switchToUltraWide(double zoom) async {
     try {
-      final result =
-          await platform.invokeMethod('switchToUltraWide', {'zoom': zoom});
+      final result = await platform.invokeMethod('switchToUltraWide', {
+        'zoom': zoom,
+        'aspectRatio': _currentAspectRatio,
+      });
       final success = result['success'] as bool;
       final message = result['message'] as String;
 
@@ -263,7 +290,10 @@ class _CameraScreenState extends State<CameraScreen>
   // 调整超广角相机缩放
   Future<void> _adjustUltraWideZoom(double zoom) async {
     try {
-      await platform.invokeMethod('switchToUltraWide', {'zoom': zoom});
+      await platform.invokeMethod('switchToUltraWide', {
+        'zoom': zoom,
+        'aspectRatio': _currentAspectRatio,
+      });
     } on PlatformException catch (e) {
       debugPrint('调整超广角相机缩放错误: ${e.message}');
     }
@@ -366,25 +396,8 @@ class _CameraScreenState extends State<CameraScreen>
                         ClipRect(
                           child: GestureDetector(
                             // 添加手势缩放功能
-                            onScaleStart: (details) {
-                              _startScale = _currentZoomLevel;
-                            },
-                            onScaleUpdate: (details) {
-                              if (details.scale != 1.0) {
-                                // 计算新的缩放级别
-                                double newZoom = _startScale * details.scale;
-
-                                // 限制缩放范围
-                                if (newZoom < _minZoomLevel) {
-                                  newZoom = _minZoomLevel;
-                                } else if (newZoom > _maxZoomLevel) {
-                                  newZoom = _maxZoomLevel;
-                                }
-
-                                // 设置新的缩放级别
-                                _handleZoom(newZoom);
-                              }
-                            },
+                            onScaleStart: _handleScaleStart,
+                            onScaleUpdate: _handleScaleUpdate,
                             child: Stack(
                               fit: StackFit.expand,
                               children: [
@@ -733,6 +746,21 @@ class _CameraScreenState extends State<CameraScreen>
     setState(() {
       _currentAspectRatio = ratio;
     });
+
+    // 如果正在使用超广角相机，更新预览层的宽高比
+    if (_isUsingUltraWide) {
+      _updateUltraWideAspectRatio(ratio);
+    }
+  }
+
+  // 更新超广角相机预览的宽高比
+  Future<void> _updateUltraWideAspectRatio(String ratio) async {
+    try {
+      await platform.invokeMethod('updateAspectRatio', {'aspectRatio': ratio});
+      debugPrint('更新超广角预览宽高比: $ratio');
+    } on PlatformException catch (e) {
+      debugPrint('更新超广角预览宽高比错误: ${e.message}');
+    }
   }
 }
 

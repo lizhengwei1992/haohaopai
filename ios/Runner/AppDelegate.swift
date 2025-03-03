@@ -24,7 +24,7 @@ class CameraManager: NSObject {
     }
     
     // 设置预览视图
-    func setPreviewView(view: UIView) {
+    func setPreviewView(view: UIView, aspectRatio: String = "4:3") {
         self.previewView = view
         
         // 如果已经有预览层，先移除
@@ -37,13 +37,25 @@ class CameraManager: NSObject {
             let previewLayer = AVCaptureVideoPreviewLayer(session: session)
             previewLayer.videoGravity = .resizeAspectFill
             
-            // 确保预览层的大小与视图匹配
-            previewLayer.frame = view.bounds
+            // 创建一个自定义的透明视图作为预览容器
+            class PassthroughView: UIView {
+                override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+                    let hitView = super.hitTest(point, with: event)
+                    // 如果点击的是当前视图，返回nil以允许事件传递
+                    return hitView == self ? nil : hitView
+                }
+                
+                override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+                    return false
+                }
+            }
             
-            // 创建一个新的UIView作为预览容器，并添加到视图层级中
-            let previewContainer = UIView(frame: view.bounds)
+            // 创建一个新的PassthroughView作为预览容器
+            let previewContainer = PassthroughView(frame: view.bounds)
             previewContainer.backgroundColor = UIColor.clear
             previewContainer.tag = 999 // 使用tag便于后续查找
+            previewContainer.isUserInteractionEnabled = false // 禁用用户交互
+            previewContainer.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             
             // 将预览层添加到预览容器
             previewContainer.layer.addSublayer(previewLayer)
@@ -55,11 +67,23 @@ class CameraManager: NSObject {
                     oldContainer.removeFromSuperview()
                 }
                 
-                // 添加新的预览容器
-                view.insertSubview(previewContainer, at: 0)
+                // 将预览容器添加到视图
+                view.addSubview(previewContainer)
+                
+                // 将预览容器移到最底层
+                view.sendSubviewToBack(previewContainer)
+                
+                // 设置预览层的frame
+                previewLayer.frame = previewContainer.bounds
                 
                 // 初始时隐藏预览层
                 previewLayer.isHidden = true
+                
+                // 应用拍摄比例
+                self.updatePreviewAspectRatio(aspectRatio: aspectRatio)
+                
+                print("预览容器已添加到视图层级，层级结构：")
+                self.printViewHierarchy(view)
             }
             
             self.videoPreviewLayer = previewLayer
@@ -68,6 +92,63 @@ class CameraManager: NSObject {
             if session.inputs.isEmpty {
                 self.setupInitialCameraInput()
             }
+        }
+    }
+    
+    // 打印视图层级结构，用于调试
+    private func printViewHierarchy(_ view: UIView, level: Int = 0) {
+        let indent = String(repeating: "  ", count: level)
+        let viewType = String(describing: type(of: view))
+        print("\(indent)View: \(viewType), tag: \(view.tag), frame: \(view.frame), zPosition: \(view.layer.zPosition), userInteraction: \(view.isUserInteractionEnabled)")
+        
+        for subview in view.subviews {
+            printViewHierarchy(subview, level: level + 1)
+        }
+    }
+    
+    // 更新预览层的宽高比
+    func updatePreviewAspectRatio(aspectRatio: String) {
+        guard let previewView = self.previewView,
+              let previewContainer = previewView.viewWithTag(999),
+              let previewLayer = self.videoPreviewLayer else {
+            return
+        }
+        
+        let screenWidth = previewView.bounds.width
+        let screenHeight = previewView.bounds.height
+        
+        // 计算目标宽高比
+        var targetAspectRatio: CGFloat
+        switch aspectRatio {
+        case "16:9":
+            targetAspectRatio = 9.0 / 16.0 // 在竖屏模式下，宽高比需要倒置
+        case "1:1":
+            targetAspectRatio = 1.0
+        case "4:3":
+            fallthrough
+        default:
+            targetAspectRatio = 3.0 / 4.0 // 在竖屏模式下，宽高比需要倒置
+        }
+        
+        // 计算预览区域的高度，确保水平方向充满屏幕宽度
+        let previewHeight = screenWidth / targetAspectRatio
+        
+        // 计算预览容器的位置，使其垂直居中
+        let yOffset = (screenHeight - previewHeight) / 2.0
+        
+        DispatchQueue.main.async {
+            // 更新预览容器的frame
+            previewContainer.frame = CGRect(x: 0, y: yOffset, width: screenWidth, height: previewHeight)
+            
+            // 更新预览层的frame以匹配预览容器
+            previewLayer.frame = previewContainer.bounds
+            
+            // 确保预览容器位于最底层
+            if let superview = previewContainer.superview {
+                superview.sendSubviewToBack(previewContainer)
+            }
+            
+            print("更新预览层宽高比: \(aspectRatio), 尺寸: \(previewContainer.frame)")
         }
     }
     
@@ -105,7 +186,7 @@ class CameraManager: NSObject {
     }
     
     // 切换到超广角相机
-    func switchToUltraWide(zoom: Double, completion: @escaping (Bool, String) -> Void) {
+    func switchToUltraWide(zoom: Double, aspectRatio: String = "4:3", completion: @escaping (Bool, String) -> Void) {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else {
                 completion(false, "CameraManager instance is nil")
@@ -127,6 +208,8 @@ class CameraManager: NSObject {
             if self.isUltraWideActive {
                 // 如果已经是超广角相机，只调整缩放
                 self.adjustZoom(zoom: zoom)
+                // 更新宽高比
+                self.updatePreviewAspectRatio(aspectRatio: aspectRatio)
                 completion(true, "Already using ultra-wide camera, zoom adjusted")
                 return
             }
@@ -160,14 +243,31 @@ class CameraManager: NSObject {
                     self.currentInput = input
                     self.isUltraWideActive = true
                     
-                    // 应用轻微的缩放因子，避免预览偏移问题
-                    try ultraWideDevice.lockForConfiguration()
-                    // 设置一个非常接近1的缩放因子，以避免预览偏移问题
+                    // 获取设备支持的缩放范围
                     let minZoom = ultraWideDevice.minAvailableVideoZoomFactor
-                    ultraWideDevice.videoZoomFactor = minZoom * 1.01
+                    let maxZoom = ultraWideDevice.maxAvailableVideoZoomFactor
+                    print("超广角相机缩放范围: \(minZoom) - \(maxZoom)")
+                    
+                    // 设置会话预设为照片质量，这对于正确显示超广角视野很重要
+                    session.sessionPreset = .photo
+                    
+                    // 计算缩放因子：将0.5-1.0的范围映射到设备的minZoom-1.0范围
+                    // 这样当Flutter传入0.5时，我们使用设备的最小缩放；当传入1.0时，我们使用1.0的缩放
+                    var zoomFactor: CGFloat
+                    if zoom < 1.0 {
+                        // 将0.5-1.0映射到minZoom-1.0
+                        let normalizedZoom = (CGFloat(zoom) - 0.5) / 0.5 // 将0.5-1.0归一化为0-1
+                        zoomFactor = minZoom + normalizedZoom * (1.0 - minZoom) // 映射到minZoom-1.0
+                    } else {
+                        zoomFactor = CGFloat(zoom)
+                    }
+                    
+                    // 应用缩放因子
+                    try ultraWideDevice.lockForConfiguration()
+                    ultraWideDevice.videoZoomFactor = zoomFactor
                     ultraWideDevice.unlockForConfiguration()
                     
-                    print("成功添加超广角相机输入")
+                    print("成功添加超广角相机输入，应用缩放因子: \(zoomFactor)")
                 } else {
                     session.commitConfiguration()
                     print("无法添加超广角相机输入到会话")
@@ -175,23 +275,37 @@ class CameraManager: NSObject {
                     return
                 }
                 
-                // 设置缩放
-                self.adjustZoom(zoom: zoom)
-                
                 session.commitConfiguration()
                 
                 // 确保预览层已设置
                 if let previewView = self.previewView, self.videoPreviewLayer == nil {
-                    self.setPreviewView(view: previewView)
+                    self.setPreviewView(view: previewView, aspectRatio: aspectRatio)
                     print("设置了新的预览层")
+                } else {
+                    // 更新现有预览层的宽高比
+                    self.updatePreviewAspectRatio(aspectRatio: aspectRatio)
                 }
                 
                 // 更新预览层的frame以匹配视图大小
                 if let previewLayer = self.videoPreviewLayer, let previewView = self.previewView {
                     DispatchQueue.main.async {
-                        previewLayer.frame = previewView.bounds
+                        // 显示预览层
                         previewLayer.isHidden = false
+                        
+                        // 确保预览容器在正确的位置
+                        if let previewContainer = previewView.viewWithTag(999) {
+                            // 将预览容器移到最底层
+                            if let superview = previewContainer.superview {
+                                superview.sendSubviewToBack(previewContainer)
+                            }
+                            
+                            print("预览容器已设置为最底层")
+                        }
+                        
                         print("显示预览层，尺寸: \(previewLayer.frame)")
+                        
+                        // 打印视图层级结构，用于调试
+                        self.printViewHierarchy(previewView)
                     }
                 }
                 
@@ -296,9 +410,19 @@ class CameraManager: NSObject {
             let minZoom = device.minAvailableVideoZoomFactor
             let maxZoom = device.maxAvailableVideoZoomFactor
             
-            // 确保缩放值在设备支持的范围内
-            let zoomFactor = max(min(CGFloat(zoom), maxZoom), minZoom)
-            device.videoZoomFactor = zoomFactor
+            // 如果是超广角相机，需要特殊处理缩放范围
+            if self.isUltraWideActive && zoom < 1.0 {
+                // 将0.5-1.0映射到minZoom-1.0
+                let normalizedZoom = (CGFloat(zoom) - 0.5) / 0.5 // 将0.5-1.0归一化为0-1
+                let zoomFactor = minZoom + normalizedZoom * (1.0 - minZoom) // 映射到minZoom-1.0
+                device.videoZoomFactor = zoomFactor
+                print("调整超广角相机缩放: \(zoom) -> \(zoomFactor)")
+            } else {
+                // 确保缩放值在设备支持的范围内
+                let zoomFactor = max(min(CGFloat(zoom), maxZoom), minZoom)
+                device.videoZoomFactor = zoomFactor
+                print("调整相机缩放: \(zoom) -> \(zoomFactor)")
+            }
             
             device.unlockForConfiguration()
         } catch {
@@ -314,10 +438,20 @@ class CameraManager: NSObject {
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     let controller = window?.rootViewController as! FlutterViewController
+    
+    // 创建一个容器视图来持有相机预览
+    let cameraContainer = UIView(frame: controller.view.bounds)
+    cameraContainer.backgroundColor = .clear
+    cameraContainer.tag = 888 // 用于标识相机容器
+    cameraContainer.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    
+    // 将相机容器添加到视图层级中
+    controller.view.insertSubview(cameraContainer, at: 0)
+    
     let cameraChannel = FlutterMethodChannel(name: "com.example.camera/ultrawide", binaryMessenger: controller.binaryMessenger)
     
-    // 设置预览视图
-    CameraManager.shared.setPreviewView(view: controller.view)
+    // 设置预览视图为相机容器
+    CameraManager.shared.setPreviewView(view: cameraContainer)
 
     cameraChannel.setMethodCallHandler { (call: FlutterMethodCall, result: @escaping FlutterResult) in
       if call.method == "switchToUltraWide" {
@@ -326,7 +460,11 @@ class CameraManager: NSObject {
           result(FlutterError(code: "INVALID_ARGUMENTS", message: "Invalid zoom value", details: nil))
           return
         }
-        CameraManager.shared.switchToUltraWide(zoom: zoom) { success, message in
+        
+        // 获取宽高比参数，默认为"4:3"
+        let aspectRatio = (args["aspectRatio"] as? String) ?? "4:3"
+        
+        CameraManager.shared.switchToUltraWide(zoom: zoom, aspectRatio: aspectRatio) { success, message in
           result(["success": success, "message": message])
         }
       } else if call.method == "switchToWideAngle" {
@@ -341,6 +479,14 @@ class CameraManager: NSObject {
       } else if call.method == "checkUltraWideCameraAvailability" {
         let isAvailable = CameraManager.shared.isUltraWideCameraAvailable()
         result(isAvailable)
+      } else if call.method == "updateAspectRatio" {
+        guard let args = call.arguments as? [String: Any],
+              let aspectRatio = args["aspectRatio"] as? String else {
+          result(FlutterError(code: "INVALID_ARGUMENTS", message: "Invalid aspect ratio", details: nil))
+          return
+        }
+        CameraManager.shared.updatePreviewAspectRatio(aspectRatio: aspectRatio)
+        result(true)
       } else {
         result(FlutterMethodNotImplemented)
       }
