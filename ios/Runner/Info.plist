@@ -27,7 +27,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>需要访问您的相机以便拍摄照片，并提供AI智能分析和构图建议</string>
+	<string>需要访问您的相机以便拍摄照片，包括使用超广角相机，并提供AI智能分析和构图建议</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>需要访问您的相册以保存和管理拍摄的照片，包括查看、保存和删除操作</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

@@ -4,6 +4,7 @@ import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'package:path/path.dart' as path;
 import 'package:provider/provider.dart';
+import 'package:flutter/services.dart';
 import 'settings/settings_screen.dart';
 import 'profile/profile_screen.dart';
 import '../providers/camera_provider.dart';
@@ -34,15 +35,21 @@ class _CameraScreenState extends State<CameraScreen>
   double _maxZoomLevel = 1.0;
   double _baseScaleLevel = 1.0;
   String _currentAspectRatio = '4:3';
+  bool _isUltraWideAvailable = false;
+  bool _isUsingUltraWide = false;
 
   // 添加手势缩放相关变量
   double _startScale = 1.0;
+
+  // 添加平台通道
+  static const platform = MethodChannel('com.example.camera/ultrawide');
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _initializeCamera();
+    _checkUltraWideCameraAvailability();
 
     // 加载应用相册中的照片
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -95,6 +102,27 @@ class _CameraScreenState extends State<CameraScreen>
     }
   }
 
+  // 检查设备是否支持超广角相机
+  Future<void> _checkUltraWideCameraAvailability() async {
+    try {
+      final bool isAvailable =
+          await platform.invokeMethod('checkUltraWideCameraAvailability');
+      setState(() {
+        _isUltraWideAvailable = isAvailable;
+        if (!isAvailable) {
+          _minZoomLevel = 1.0; // 如果不支持超广角，最小缩放级别设为1.0
+        }
+      });
+      debugPrint('超广角相机可用性: $_isUltraWideAvailable');
+    } on PlatformException catch (e) {
+      debugPrint('检查超广角相机可用性错误: ${e.message}');
+      setState(() {
+        _isUltraWideAvailable = false;
+        _minZoomLevel = 1.0;
+      });
+    }
+  }
+
   Future<void> _initializeCamera() async {
     try {
       _cameras = await availableCameras();
@@ -115,17 +143,20 @@ class _CameraScreenState extends State<CameraScreen>
 
       // 获取相机支持的缩放范围
       try {
-        _minZoomLevel = await cameraController.getMinZoomLevel();
-        _maxZoomLevel = await cameraController.getMaxZoomLevel();
+        final minZoom = await cameraController.getMinZoomLevel();
+        final maxZoom = await cameraController.getMaxZoomLevel();
 
-        // 确保最小缩放级别支持广角
-        if (_minZoomLevel > 0.5) {
-          _minZoomLevel = 0.5;
-        }
+        setState(() {
+          // 如果设备支持超广角，最小缩放级别设为0.5
+          _minZoomLevel = _isUltraWideAvailable ? 0.5 : minZoom;
+          _maxZoomLevel = maxZoom;
+        });
       } catch (e) {
         // 如果获取失败，使用默认值
-        _minZoomLevel = 0.5;
-        _maxZoomLevel = 2.0;
+        setState(() {
+          _minZoomLevel = _isUltraWideAvailable ? 0.5 : 1.0;
+          _maxZoomLevel = 2.0;
+        });
         debugPrint('获取缩放级别错误: $e');
       }
 
@@ -153,16 +184,88 @@ class _CameraScreenState extends State<CameraScreen>
     }
   }
 
-  Future<void> _setZoomLevel(double zoom) async {
-    if (_controller == null) return;
+  // 处理缩放变化
+  Future<void> _handleZoom(double zoom) async {
+    if (zoom < 0.5) zoom = 0.5;
+    if (zoom > _maxZoomLevel) zoom = _maxZoomLevel;
+
+    setState(() {
+      _currentZoomLevel = zoom;
+    });
 
     try {
-      await _controller!.setZoomLevel(zoom);
-      setState(() {
-        _currentZoomLevel = zoom;
-      });
+      if (_isUltraWideAvailable) {
+        if (zoom < 1.0 && !_isUsingUltraWide) {
+          // 切换到超广角相机
+          await _switchToUltraWide(zoom);
+        } else if (zoom >= 1.0 && _isUsingUltraWide) {
+          // 切换回广角相机
+          await _switchToWideAngle(zoom);
+        } else {
+          // 只调整缩放
+          if (_isUsingUltraWide) {
+            await _adjustUltraWideZoom(zoom);
+          } else {
+            await _controller!.setZoomLevel(zoom);
+          }
+        }
+      } else {
+        // 设备不支持超广角，直接使用相机控制器设置缩放
+        await _controller!.setZoomLevel(zoom);
+      }
     } catch (e) {
       debugPrint('设置缩放级别错误: $e');
+    }
+  }
+
+  // 切换到超广角相机
+  Future<void> _switchToUltraWide(double zoom) async {
+    try {
+      final result =
+          await platform.invokeMethod('switchToUltraWide', {'zoom': zoom});
+      final success = result['success'] as bool;
+      final message = result['message'] as String;
+
+      if (success) {
+        setState(() {
+          _isUsingUltraWide = true;
+        });
+        debugPrint('切换到超广角相机成功: $message');
+      } else {
+        debugPrint('切换到超广角相机失败: $message');
+      }
+    } on PlatformException catch (e) {
+      debugPrint('切换到超广角相机错误: ${e.message}');
+    }
+  }
+
+  // 切换到广角相机
+  Future<void> _switchToWideAngle(double zoom) async {
+    try {
+      final result =
+          await platform.invokeMethod('switchToWideAngle', {'zoom': zoom});
+      final success = result['success'] as bool;
+      final message = result['message'] as String;
+
+      if (success) {
+        setState(() {
+          _isUsingUltraWide = false;
+        });
+        debugPrint('切换到广角相机成功: $message');
+      } else {
+        debugPrint('切换到广角相机失败: $message');
+      }
+    } on PlatformException catch (e) {
+      debugPrint('切换到广角相机错误: ${e.message}');
+    }
+  }
+
+  // 调整超广角相机缩放
+  Future<void> _adjustUltraWideZoom(double zoom) async {
+    try {
+      await platform.invokeMethod('switchToUltraWide', {'zoom': zoom});
+    } on PlatformException catch (e) {
+      debugPrint('调整超广角相机缩放错误: ${e.message}');
     }
   }
 
@@ -279,19 +382,32 @@ class _CameraScreenState extends State<CameraScreen>
                                 }
 
                                 // 设置新的缩放级别
-                                _setZoomLevel(newZoom);
+                                _handleZoom(newZoom);
                               }
                             },
-                            child: OverflowBox(
-                              alignment: Alignment.center,
-                              child: FittedBox(
-                                fit: BoxFit.cover,
-                                child: SizedBox(
-                                  width: screenWidth,
-                                  height: screenWidth * originalAspectRatio,
-                                  child: CameraPreview(_controller!),
-                                ),
-                              ),
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                // 当不使用超广角时显示Flutter相机预览
+                                if (!_isUsingUltraWide)
+                                  OverflowBox(
+                                    alignment: Alignment.center,
+                                    child: FittedBox(
+                                      fit: BoxFit.cover,
+                                      child: SizedBox(
+                                        width: screenWidth,
+                                        height:
+                                            screenWidth * originalAspectRatio,
+                                        child: CameraPreview(_controller!),
+                                      ),
+                                    ),
+                                  ),
+                                // 当使用超广角时显示透明容器，让原生预览层可见
+                                if (_isUsingUltraWide)
+                                  Container(
+                                    color: Colors.transparent,
+                                  ),
+                              ],
                             ),
                           ),
                         ),
@@ -389,9 +505,35 @@ class _CameraScreenState extends State<CameraScreen>
               currentZoom: _currentZoomLevel,
               minZoom: _minZoomLevel,
               maxZoom: _maxZoomLevel,
-              onZoomChanged: _setZoomLevel,
+              onZoomChanged: _handleZoom,
             ),
           ),
+
+          // 超广角模式指示器
+          if (_isUsingUltraWide)
+            Positioned(
+              top: topPadding + 110, // 放在缩放控制下方
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.6),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: const Text(
+                    '超广角模式',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+              ),
+            ),
 
           // 底部操作栏 - 放在Stack中，使其可以与预览框重叠
           Positioned(
@@ -458,15 +600,24 @@ class _CameraScreenState extends State<CameraScreen>
 
   // 切换前后摄像头
   Future<void> _switchCamera() async {
-    if (_cameras.length < 2) return;
+    if (_cameras.length < 2) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('没有可用的其他相机')),
+      );
+      return;
+    }
 
-    final int currentIndex = _cameras.indexOf(_controller!.description);
-    final int newIndex = (currentIndex + 1) % _cameras.length;
+    final int currentCameraIndex = _cameras.indexOf(_controller!.description);
+    final int newCameraIndex = (currentCameraIndex + 1) % _cameras.length;
 
-    await _controller?.dispose();
+    await _controller!.dispose();
+    setState(() {
+      _isInitialized = false;
+      _isUsingUltraWide = false; // 切换相机时重置超广角状态
+    });
 
     final CameraController cameraController = CameraController(
-      _cameras[newIndex],
+      _cameras[newCameraIndex],
       ResolutionPreset.max,
       enableAudio: false,
       imageFormatGroup: ImageFormatGroup.yuv420,
@@ -476,15 +627,17 @@ class _CameraScreenState extends State<CameraScreen>
 
     try {
       await cameraController.initialize();
-      _minZoomLevel = await cameraController.getMinZoomLevel();
-      _maxZoomLevel = await cameraController.getMaxZoomLevel();
 
-      if (mounted) {
-        setState(() {
-          _isInitialized = true;
-          _currentZoomLevel = 1.0;
-        });
-      }
+      // 获取新相机的缩放范围
+      final minZoom = await cameraController.getMinZoomLevel();
+      final maxZoom = await cameraController.getMaxZoomLevel();
+
+      setState(() {
+        _isInitialized = true;
+        _minZoomLevel = _isUltraWideAvailable ? 0.5 : minZoom;
+        _maxZoomLevel = maxZoom;
+        _currentZoomLevel = 1.0; // 重置缩放级别
+      });
     } catch (e) {
       debugPrint('切换相机错误: $e');
     }
@@ -492,381 +645,94 @@ class _CameraScreenState extends State<CameraScreen>
 
   // 设置曝光值
   Future<void> _setExposure(double value) async {
-    if (_controller == null) return;
+    if (_controller == null || !_controller!.value.isInitialized) return;
 
     try {
       await _controller!.setExposureOffset(value);
     } catch (e) {
-      debugPrint('设置曝光值错误: $e');
+      debugPrint('设置曝光错误: $e');
     }
   }
 
   // 处理"拍摄"按钮点击
   Future<void> _handleCapturePress(BuildContext context) async {
-    if (_controller == null || !_controller!.value.isInitialized) {
-      return;
-    }
-
     final cameraProvider = Provider.of<CameraProvider>(context, listen: false);
-    final showingTips = cameraProvider.state == CameraState.showingTips;
-    String originalPath;
 
     try {
-      if (showingTips && cameraProvider.originalPhotoPath != null) {
-        // 如果正在显示拍摄建议，使用之前保存的原始照片路径
-        originalPath = cameraProvider.originalPhotoPath!;
-      } else {
-        // 否则拍摄新照片
-        // 注意：这里只是拍摄原始照片，裁剪将在后续处理中进行
-        final XFile photo = await _controller!.takePicture();
-        originalPath = photo.path;
+      // 拍照
+      final Directory extDir = await getTemporaryDirectory();
+      final String dirPath = '${extDir.path}/Pictures/好好拍';
+      await Directory(dirPath).create(recursive: true);
+      final String filePath =
+          '$dirPath/${DateTime.now().millisecondsSinceEpoch}.jpg';
 
-        debugPrint('原始照片已拍摄: $originalPath');
-      }
+      // 使用相机控制器拍照
+      final XFile photo = await _controller!.takePicture();
+      await photo.saveTo(filePath);
 
-      // 将原始图像数据保存为压缩的PNG格式，并应用裁剪
-      final String pngPath =
-          await _saveAsPng(originalPath, _currentAspectRatio);
-      debugPrint('照片已处理并保存: $pngPath');
+      // 保存照片到相册
+      await cameraProvider.saveToGallery(filePath);
 
-      // 询问是否保存到相册
-      if (mounted) {
-        final save = await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('保存照片'),
-            content: const Text('是否保存到相册?'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('取消'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('保存'),
-              ),
-            ],
-          ),
-        );
-
-        if (save == true) {
-          try {
-            // 保存PNG格式照片到相册
-            await cameraProvider.saveToGallery(pngPath);
-
-            // 保存成功后显示提示
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('照片已保存到相册')),
-              );
-            }
-          } catch (e) {
-            debugPrint('保存照片到相册出错: $e');
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('保存失败')),
-              );
-            }
-          }
-        } else {
-          // 如果用户选择不保存到相册，仍然将照片添加到最近照片列表
-          // 这样用户可以在预览框中看到刚拍摄的照片
-          final metadata = PhotoMetadata(
-            path: pngPath,
-            timestamp: DateTime.now(),
-            isFromApp: true,
-          );
-
-          cameraProvider.addPhotoToRecentList(metadata);
-        }
-
-        // 只重置拍摄状态，不影响最近照片列表
-        cameraProvider.reset();
-      }
+      // 重置状态
+      cameraProvider.reset();
     } catch (e) {
       debugPrint('拍照错误: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('拍照出错，请重试')),
-        );
-      }
-    }
-  }
-
-  // 将原始图像数据保存为压缩的PNG格式，并应用裁剪
-  Future<String> _saveAsPng(String imagePath, String aspectRatioStr) async {
-    try {
-      final File imageFile = File(imagePath);
-      final Directory tempDir = await getTemporaryDirectory();
-      final String pngPath =
-          '${tempDir.path}/photo_${DateTime.now().millisecondsSinceEpoch}.png';
-
-      // 获取原始文件大小
-      final originalSize = await imageFile.length();
-      debugPrint('原始图片大小: ${(originalSize / 1024).toStringAsFixed(1)}KB');
-
-      // 读取原始图像数据
-      final bytes = await imageFile.readAsBytes();
-      // 使用image包解码图像
-      final img.Image? originalImage = img.decodeImage(bytes);
-
-      if (originalImage != null) {
-        // 根据选择的拍摄比例裁剪图像
-        img.Image croppedImage = originalImage;
-
-        // 计算目标宽高比
-        double targetAspectRatio;
-        switch (aspectRatioStr) {
-          case '16:9':
-            targetAspectRatio = 16 / 9;
-            break;
-          case '1:1':
-            targetAspectRatio = 1;
-            break;
-          case '4:3':
-          default:
-            targetAspectRatio = 4 / 3;
-            break;
-        }
-
-        // 计算原始图像的宽高比（注意：相机拍摄的照片通常是横向的，所以不需要倒置比例）
-        final originalAspectRatio = originalImage.width / originalImage.height;
-        debugPrint('原始照片宽高比: $originalAspectRatio, 目标宽高比: $targetAspectRatio');
-
-        // 根据宽高比计算裁剪区域
-        if ((originalAspectRatio - targetAspectRatio).abs() > 0.01) {
-          int cropWidth, cropHeight;
-          int offsetX = 0, offsetY = 0;
-
-          if (originalAspectRatio > targetAspectRatio) {
-            // 原始图像更宽，需要裁剪宽度
-            cropHeight = originalImage.height;
-            cropWidth = (cropHeight * targetAspectRatio).round();
-            offsetX = ((originalImage.width - cropWidth) / 2).round();
-          } else {
-            // 原始图像更高，需要裁剪高度
-            cropWidth = originalImage.width;
-            cropHeight = (cropWidth / targetAspectRatio).round();
-            offsetY = ((originalImage.height - cropHeight) / 2).round();
-          }
-
-          // 裁剪图像
-          croppedImage = img.copyCrop(
-            originalImage,
-            x: offsetX,
-            y: offsetY,
-            width: cropWidth,
-            height: cropHeight,
-          );
-
-          debugPrint(
-              '图像已裁剪: ${originalImage.width}x${originalImage.height} -> ${croppedImage.width}x${croppedImage.height}');
-          debugPrint(
-              '裁剪区域: 偏移($offsetX, $offsetY), 尺寸($cropWidth, $cropHeight)');
-        } else {
-          debugPrint('原始照片宽高比与目标宽高比接近，无需裁剪');
-        }
-
-        // 编码为PNG格式并保存
-        final pngBytes = img.encodePng(croppedImage);
-        final pngFile = File(pngPath);
-        await pngFile.writeAsBytes(pngBytes);
-
-        // 获取保存后的文件大小
-        final savedSize = await pngFile.length();
-        debugPrint('保存后图片大小: ${(savedSize / 1024).toStringAsFixed(1)}KB');
-
-        return pngPath;
-      }
-
-      return imagePath;
-    } catch (e) {
-      debugPrint('保存PNG格式出错: $e');
-      return imagePath;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('拍照失败: $e')),
+      );
     }
   }
 
   // 处理"教我拍"按钮点击
   Future<void> _handleTeachPress(BuildContext context) async {
-    if (_controller == null || !_controller!.value.isInitialized) {
-      return;
-    }
-
     final cameraProvider = Provider.of<CameraProvider>(context, listen: false);
 
     try {
       // 拍照
+      final Directory extDir = await getTemporaryDirectory();
+      final String dirPath = '${extDir.path}/Pictures/好好拍';
+      await Directory(dirPath).create(recursive: true);
+      final String filePath =
+          '$dirPath/${DateTime.now().millisecondsSinceEpoch}.jpg';
+
+      // 使用相机控制器拍照
       final XFile photo = await _controller!.takePicture();
-
-      // 直接将原始图像数据保存为PNG格式，并应用裁剪
-      final String pngPath = await _saveAsPng(photo.path, _currentAspectRatio);
-
-      // 保存原始照片路径，以便后续使用
-      cameraProvider.setOriginalPhotoPath(pngPath);
-
-      // 压缩照片用于AI分析，减少传输时间
-      final compressedPath = await _compressImageForAnalysis(pngPath);
+      await photo.saveTo(filePath);
 
       // 分析照片
-      await cameraProvider.analyzeImage(compressedPath);
-
-      // 分析完成后删除临时压缩文件
-      if (compressedPath != pngPath) {
-        await File(compressedPath).delete().catchError((e) {
-          debugPrint('删除临时压缩文件出错: $e');
-        });
-      }
-
-      debugPrint('照片已分析: $pngPath');
+      await cameraProvider.analyzeImage(filePath);
     } catch (e) {
-      debugPrint('教我拍照错误: $e');
+      debugPrint('拍照错误: $e');
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('无法分析照片，请重试')),
+        SnackBar(content: Text('拍照失败: $e')),
       );
     }
   }
 
-  // 压缩图像用于AI分析
-  Future<String> _compressImageForAnalysis(String imagePath,
-      {int quality = 80}) async {
-    try {
-      final file = File(imagePath);
-      final dir = await getTemporaryDirectory();
-      final targetPath =
-          '${dir.path}/analysis_${DateTime.now().millisecondsSinceEpoch}.jpg';
-
-      // 获取原始文件大小
-      final originalSize = await file.length();
-      debugPrint('AI分析原始图片大小: ${(originalSize / 1024).toStringAsFixed(1)}KB');
-
-      // 如果原始文件已经小于300KB，直接返回
-      if (originalSize < 300 * 1024) {
-        debugPrint('图片已经足够小，无需压缩用于AI分析');
-        return imagePath;
-      }
-
-      // 根据原始图片大小动态调整压缩质量
-      int dynamicQuality = quality;
-      if (originalSize > 3 * 1024 * 1024) {
-        // 大于3MB
-        dynamicQuality = 70;
-      } else if (originalSize > 1 * 1024 * 1024) {
-        // 大于1MB
-        dynamicQuality = 75;
-      }
-
-      final result = await FlutterImageCompress.compressAndGetFile(
-        file.absolute.path,
-        targetPath,
-        quality: dynamicQuality,
-        // 保持较高的分辨率以确保AI分析质量
-        minWidth: 1280,
-        minHeight: 1280,
-        format: CompressFormat.jpeg,
-      );
-
-      if (result == null) return imagePath;
-
-      // 检查压缩后的文件大小
-      final compressedSize = await result.length();
-      final savingPercentage =
-          ((originalSize - compressedSize) / originalSize * 100)
-              .toStringAsFixed(1);
-      debugPrint(
-          'AI分析图片压缩: 原始大小 ${(originalSize / 1024).toStringAsFixed(1)}KB, 压缩后 ${(compressedSize / 1024).toStringAsFixed(1)}KB, 节省 $savingPercentage%');
-
-      // 如果压缩后仍然超过800KB且质量大于60，递归压缩，降低质量
-      if (compressedSize > 800 * 1024 && dynamicQuality > 60) {
-        await File(result.path).delete();
-        return _compressImageForAnalysis(imagePath,
-            quality: dynamicQuality - 10);
-      }
-
-      return result.path;
-    } catch (e) {
-      debugPrint('压缩图像出错: $e');
-      return imagePath;
-    }
-  }
-
+  // 显示全屏图片
   void _showFullScreenImage(BuildContext context, String imagePath) {
-    // 在导航前释放相机资源
-    if (_controller != null && _controller!.value.isInitialized) {
-      _controller!.dispose();
-      _isInitialized = false;
-    }
-
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => FullScreenImage(imagePath: imagePath),
+        builder: (context) => Scaffold(
+          backgroundColor: Colors.black,
+          appBar: AppBar(
+            backgroundColor: Colors.black,
+            iconTheme: const IconThemeData(color: Colors.white),
+          ),
+          body: Center(
+            child: Image.file(File(imagePath)),
+          ),
+        ),
       ),
-    ).then((_) {
-      // 返回时重新初始化相机
-      if (!_isInitialized ||
-          _controller == null ||
-          !_controller!.value.isInitialized) {
-        _initializeCamera();
-      }
-    });
+    );
   }
 
   // 处理拍摄比例变化
-  Future<void> _updateAspectRatio(String ratio) async {
+  void _updateAspectRatio(String ratio) {
     setState(() {
       _currentAspectRatio = ratio;
     });
-
-    debugPrint('拍摄比例已更改为: $ratio');
-
-    // 如果相机控制器已初始化，尝试更新相机的拍摄比例
-    if (_controller != null && _controller!.value.isInitialized) {
-      try {
-        // 计算新的目标宽高比
-        double targetAspectRatio;
-        switch (ratio) {
-          case '16:9':
-            targetAspectRatio = 9 / 16; // 在竖屏模式下，宽高比需要倒置
-            break;
-          case '1:1':
-            targetAspectRatio = 1;
-            break;
-          case '4:3':
-          default:
-            targetAspectRatio = 3 / 4; // 在竖屏模式下，宽高比需要倒置
-            break;
-        }
-
-        // 获取屏幕尺寸
-        final screenWidth = MediaQuery.of(context).size.width;
-        final screenHeight = MediaQuery.of(context).size.height;
-        final previewHeight = screenWidth / targetAspectRatio;
-
-        debugPrint(
-            '目标宽高比: $targetAspectRatio, 预览尺寸: $screenWidth x $previewHeight');
-        debugPrint('屏幕尺寸: $screenWidth x $screenHeight');
-
-        // 强制重新布局以确保预览框尺寸和位置正确更新
-        setState(() {});
-
-        // 添加短暂延迟后再次更新，确保布局完全应用
-        // 这将更新顶部按钮和缩放控制的位置
-        Future.delayed(const Duration(milliseconds: 100), () {
-          if (mounted) {
-            setState(() {});
-          }
-        });
-
-        // 再添加一次延迟更新，确保在动画完成后布局稳定
-        Future.delayed(const Duration(milliseconds: 300), () {
-          if (mounted) {
-            setState(() {});
-          }
-        });
-      } catch (e) {
-        debugPrint('设置拍摄比例错误: $e');
-      }
-    }
   }
 }
 
