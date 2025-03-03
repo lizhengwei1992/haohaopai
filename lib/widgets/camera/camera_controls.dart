@@ -46,35 +46,32 @@ class _CameraControlsState extends State<CameraControls> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: Colors.black.withOpacity(0.5),
+      color: Colors.transparent,
       child: SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             // 控制按钮行 - 只保留三个按钮
             Padding(
-              padding: const EdgeInsets.only(bottom: 5.0, top: 10.0),
+              padding: const EdgeInsets.only(bottom: 15.0, top: 20.0),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
                   // 拍摄比例
                   _buildControlButton(
                     icon: _getAspectRatioIcon(),
-                    label: _currentAspectRatio,
                     onTap: _showAspectRatioSelector,
                   ),
 
                   // 曝光选择
                   _buildControlButton(
                     icon: Icons.brightness_6_outlined,
-                    label: '曝光',
                     onTap: _showExposureSelector,
                   ),
 
                   // 滤镜选择
                   _buildControlButton(
                     icon: Icons.filter_b_and_w,
-                    label: '滤镜',
                     onTap: _showFilterSelector,
                   ),
                 ],
@@ -83,7 +80,7 @@ class _CameraControlsState extends State<CameraControls> {
 
             // 拍摄按钮行
             Padding(
-              padding: const EdgeInsets.only(bottom: 15.0, top: 5.0),
+              padding: const EdgeInsets.only(bottom: 35.0, top: 15.0),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -175,36 +172,30 @@ class _CameraControlsState extends State<CameraControls> {
 
   Widget _buildControlButton({
     required IconData icon,
-    required String label,
     required VoidCallback onTap,
   }) {
     return GestureDetector(
       onTap: onTap,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 35,
-            height: 35,
-            decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.5),
-              shape: BoxShape.circle,
+      child: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.7),
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white.withOpacity(0.3), width: 1),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 4,
+              spreadRadius: 1,
             ),
-            child: Icon(
-              icon,
-              color: Colors.white,
-              size: 18,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 10,
-            ),
-          ),
-        ],
+          ],
+        ),
+        child: Icon(
+          icon,
+          color: Colors.white,
+          size: 20,
+        ),
       ),
     );
   }
@@ -213,16 +204,23 @@ class _CameraControlsState extends State<CameraControls> {
     return GestureDetector(
       onTap: widget.showingTips ? widget.onCapturePress : widget.onTeachPress,
       child: Container(
-        width: 70,
-        height: 70,
+        width: 60,
+        height: 60,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           border: Border.all(color: Colors.white, width: 3),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.3),
+              blurRadius: 8,
+              spreadRadius: 2,
+            ),
+          ],
         ),
         child: Center(
           child: Container(
-            width: 60,
-            height: 60,
+            width: 50,
+            height: 50,
             decoration: const BoxDecoration(
               shape: BoxShape.circle,
               color: Colors.white,
@@ -236,7 +234,7 @@ class _CameraControlsState extends State<CameraControls> {
   void _showAspectRatioSelector() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.black.withOpacity(0.8),
+      backgroundColor: Colors.black.withOpacity(0.9),
       builder: (context) {
         return Container(
           padding: const EdgeInsets.all(20),
@@ -252,56 +250,50 @@ class _CameraControlsState extends State<CameraControls> {
                 ),
               ),
               const SizedBox(height: 20),
-              SizedBox(
-                height: 80,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _aspectRatioOptions.length,
-                  itemBuilder: (context, index) {
-                    final option = _aspectRatioOptions[index];
-                    final isSelected = option['value'] == _currentAspectRatio;
-
-                    return GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          _currentAspectRatio = option['value'];
-                        });
-                        widget.onAspectRatioChange(option['value']);
-                        Navigator.pop(context);
-                      },
-                      child: Container(
-                        width: 80,
-                        margin: const EdgeInsets.symmetric(horizontal: 10),
-                        decoration: BoxDecoration(
-                          color: isSelected
-                              ? Colors.white
-                              : Colors.grey.withOpacity(0.3),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              option['icon'],
-                              color: isSelected ? Colors.black : Colors.white,
-                              size: 30,
-                            ),
-                            const SizedBox(height: 5),
-                            Text(
-                              option['label'],
-                              style: TextStyle(
-                                color: isSelected ? Colors.black : Colors.white,
-                                fontWeight: isSelected
-                                    ? FontWeight.bold
-                                    : FontWeight.normal,
-                              ),
-                            ),
-                          ],
-                        ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: _aspectRatioOptions.map((option) {
+                  final bool isSelected =
+                      _currentAspectRatio == option['value'];
+                  return GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _currentAspectRatio = option['value'];
+                      });
+                      widget.onAspectRatioChange(option['value']);
+                      Navigator.pop(context);
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? Colors.white
+                            : Colors.grey.withOpacity(0.3),
+                        borderRadius: BorderRadius.circular(20),
                       ),
-                    );
-                  },
-                ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            option['icon'],
+                            color: isSelected ? Colors.black : Colors.white,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            option['label'],
+                            style: TextStyle(
+                              color: isSelected ? Colors.black : Colors.white,
+                              fontWeight: isSelected
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
               ),
             ],
           ),
@@ -313,100 +305,80 @@ class _CameraControlsState extends State<CameraControls> {
   void _showExposureSelector() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.black.withOpacity(0.8),
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return Container(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text(
-                    '调整曝光',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Text(
-                        '-2.0',
-                        style: TextStyle(color: Colors.white),
-                      ),
-                      Expanded(
-                        child: Slider(
-                          value: _currentExposure,
-                          min: -2.0,
-                          max: 2.0,
-                          divisions: 40,
-                          activeColor: Colors.white,
-                          inactiveColor: Colors.grey,
-                          onChanged: (value) {
-                            setState(() {
-                              _currentExposure = value;
-                            });
-                          },
-                          onChangeEnd: (value) {
-                            this.setState(() {
-                              _currentExposure = value;
-                            });
-                            widget.onExposureChange(value);
-                            Navigator.pop(context);
-                          },
-                        ),
-                      ),
-                      const Text(
-                        '+2.0',
-                        style: TextStyle(color: Colors.white),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  void _showFilterSelector() {
-    _showBottomSelector(
-      title: '选择滤镜',
-      options: _filters,
-      currentValue: _currentFilter,
-      onSelected: (filter) {
-        setState(() {
-          _currentFilter = filter;
-        });
-        widget.onFilterChange(filter);
-      },
-    );
-  }
-
-  void _showBottomSelector({
-    required String title,
-    required List<String> options,
-    required String currentValue,
-    required Function(String) onSelected,
-  }) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.black.withOpacity(0.8),
+      backgroundColor: Colors.black.withOpacity(0.9),
       builder: (context) {
         return Container(
           padding: const EdgeInsets.all(20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              const Text(
+                '调整曝光',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  const Icon(Icons.brightness_low, color: Colors.white),
+                  Expanded(
+                    child: Slider(
+                      value: _currentExposure,
+                      min: -2.0,
+                      max: 2.0,
+                      divisions: 20,
+                      label: _currentExposure.toStringAsFixed(1),
+                      onChanged: (value) {
+                        setState(() {
+                          _currentExposure = value;
+                        });
+                        widget.onExposureChange(value);
+                      },
+                    ),
+                  ),
+                  const Icon(Icons.brightness_high, color: Colors.white),
+                ],
+              ),
+              const SizedBox(height: 10),
               Text(
-                title,
-                style: const TextStyle(
+                '当前值: ${_currentExposure.toStringAsFixed(1)}',
+                style: const TextStyle(color: Colors.white),
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.black,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                ),
+                child: const Text('确定'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showFilterSelector() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.black.withOpacity(0.9),
+      builder: (context) {
+        return Container(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                '选择滤镜',
+                style: TextStyle(
                   color: Colors.white,
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
@@ -414,39 +386,53 @@ class _CameraControlsState extends State<CameraControls> {
               ),
               const SizedBox(height: 20),
               SizedBox(
-                height: 60,
+                height: 100,
                 child: ListView.builder(
                   scrollDirection: Axis.horizontal,
-                  itemCount: options.length,
+                  itemCount: _filters.length,
                   itemBuilder: (context, index) {
-                    final option = options[index];
-                    final isSelected = option == currentValue;
+                    final filter = _filters[index];
+                    final isSelected = filter == _currentFilter;
 
                     return GestureDetector(
                       onTap: () {
-                        onSelected(option);
+                        setState(() {
+                          _currentFilter = filter;
+                        });
+                        widget.onFilterChange(filter);
                         Navigator.pop(context);
                       },
                       child: Container(
+                        width: 80,
                         margin: const EdgeInsets.symmetric(horizontal: 10),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 15, vertical: 10),
                         decoration: BoxDecoration(
                           color: isSelected
                               ? Colors.white
                               : Colors.grey.withOpacity(0.3),
-                          borderRadius: BorderRadius.circular(20),
+                          borderRadius: BorderRadius.circular(10),
+                          border: isSelected
+                              ? Border.all(color: Colors.white, width: 2)
+                              : null,
                         ),
-                        child: Center(
-                          child: Text(
-                            option,
-                            style: TextStyle(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.filter,
                               color: isSelected ? Colors.black : Colors.white,
-                              fontWeight: isSelected
-                                  ? FontWeight.bold
-                                  : FontWeight.normal,
+                              size: 30,
                             ),
-                          ),
+                            const SizedBox(height: 5),
+                            Text(
+                              filter,
+                              style: TextStyle(
+                                color: isSelected ? Colors.black : Colors.white,
+                                fontWeight: isSelected
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     );

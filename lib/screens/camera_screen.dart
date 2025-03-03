@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:path/path.dart' as path;
 import 'package:provider/provider.dart';
 import 'settings/settings_screen.dart';
+import 'profile/profile_screen.dart';
 import '../providers/camera_provider.dart';
 import '../providers/settings_provider.dart';
 import '../widgets/camera/shooting_tips.dart';
@@ -33,6 +34,9 @@ class _CameraScreenState extends State<CameraScreen>
   double _maxZoomLevel = 1.0;
   double _baseScaleLevel = 1.0;
   String _currentAspectRatio = '4:3';
+
+  // 添加手势缩放相关变量
+  double _startScale = 1.0;
 
   @override
   void initState() {
@@ -214,26 +218,22 @@ class _CameraScreenState extends State<CameraScreen>
     double targetAspectRatio;
     switch (_currentAspectRatio) {
       case '16:9':
-        targetAspectRatio = 16 / 9;
+        targetAspectRatio = 9 / 16; // 在竖屏模式下，宽高比需要倒置
         break;
       case '1:1':
         targetAspectRatio = 1;
         break;
       case '4:3':
       default:
-        targetAspectRatio = 4 / 3;
+        targetAspectRatio = 3 / 4; // 在竖屏模式下，宽高比需要倒置
         break;
     }
 
-    // 在竖屏模式下，宽高比需要倒置
-    final portraitTargetRatio = 1 / targetAspectRatio;
-
     // 计算预览区域的高度，确保水平方向充满屏幕宽度
-    final previewHeight = screenWidth / portraitTargetRatio;
+    final previewHeight = screenWidth / targetAspectRatio;
 
     // 打印当前预览区域的比例和尺寸，用于调试
-    debugPrint(
-        '原始相机比例: $originalAspectRatio, 目标比例: $targetAspectRatio, 竖屏目标比例: $portraitTargetRatio');
+    debugPrint('原始相机比例: $originalAspectRatio, 目标比例: $targetAspectRatio');
     debugPrint('预览区域尺寸: $screenWidth x $previewHeight');
 
     return Scaffold(
@@ -261,21 +261,46 @@ class _CameraScreenState extends State<CameraScreen>
                       children: [
                         // 相机预览 - 使用正确的裁剪方式避免变形
                         ClipRect(
-                          child: OverflowBox(
-                            alignment: Alignment.center,
-                            child: FittedBox(
-                              fit: BoxFit.cover,
-                              child: SizedBox(
-                                width: screenWidth,
-                                height: screenWidth * originalAspectRatio,
-                                child: CameraPreview(_controller!),
+                          child: GestureDetector(
+                            // 添加手势缩放功能
+                            onScaleStart: (details) {
+                              _startScale = _currentZoomLevel;
+                            },
+                            onScaleUpdate: (details) {
+                              if (details.scale != 1.0) {
+                                // 计算新的缩放级别
+                                double newZoom = _startScale * details.scale;
+
+                                // 限制缩放范围
+                                if (newZoom < _minZoomLevel) {
+                                  newZoom = _minZoomLevel;
+                                } else if (newZoom > _maxZoomLevel) {
+                                  newZoom = _maxZoomLevel;
+                                }
+
+                                // 设置新的缩放级别
+                                _setZoomLevel(newZoom);
+                              }
+                            },
+                            child: OverflowBox(
+                              alignment: Alignment.center,
+                              child: FittedBox(
+                                fit: BoxFit.cover,
+                                child: SizedBox(
+                                  width: screenWidth,
+                                  height: screenWidth * originalAspectRatio,
+                                  child: CameraPreview(_controller!),
+                                ),
                               ),
                             ),
                           ),
                         ),
 
-                        // 相机网格线
-                        if (showGridLines) CameraGridLines(showGrid: true),
+                        // 相机网格线 - 移到GestureDetector之外，确保不会阻挡手势
+                        if (showGridLines)
+                          IgnorePointer(
+                            child: CameraGridLines(showGrid: true),
+                          ),
                       ],
                     ),
                   ),
@@ -299,30 +324,78 @@ class _CameraScreenState extends State<CameraScreen>
             left: 0,
             right: 0,
             child: Container(
-              padding: const EdgeInsets.only(top: 20, bottom: 10),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.black.withOpacity(0.7),
-                    Colors.transparent,
-                  ],
-                  stops: const [0.0, 1.0],
-                ),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  // 个人中心按钮
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const ProfileScreen(),
+                        ),
+                      );
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.5),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: const Icon(
+                        Icons.person,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                    ),
+                  ),
+
+                  // 设置按钮
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const SettingsScreen(),
+                        ),
+                      );
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.5),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: const Icon(
+                        Icons.settings,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              child: ZoomControl(
-                currentZoom: _currentZoomLevel,
-                minZoom: _minZoomLevel,
-                maxZoom: _maxZoomLevel,
-                onZoomChanged: _setZoomLevel,
-              ),
+            ),
+          ),
+
+          // 缩放控制 - 移回顶部
+          Positioned(
+            top: topPadding + 60, // 放在顶部按钮下方
+            left: 0,
+            right: 0,
+            child: ZoomControl(
+              currentZoom: _currentZoomLevel,
+              minZoom: _minZoomLevel,
+              maxZoom: _maxZoomLevel,
+              onZoomChanged: _setZoomLevel,
             ),
           ),
 
           // 底部操作栏 - 放在Stack中，使其可以与预览框重叠
           Positioned(
-            bottom: 0,
+            bottom: 20, // 增加底部间距，使控制器更靠下
             left: 0,
             right: 0,
             child: CameraControls(
@@ -744,6 +817,8 @@ class _CameraScreenState extends State<CameraScreen>
       _currentAspectRatio = ratio;
     });
 
+    debugPrint('拍摄比例已更改为: $ratio');
+
     // 如果相机控制器已初始化，尝试更新相机的拍摄比例
     if (_controller != null && _controller!.value.isInitialized) {
       try {
@@ -751,31 +826,31 @@ class _CameraScreenState extends State<CameraScreen>
         double targetAspectRatio;
         switch (ratio) {
           case '16:9':
-            targetAspectRatio = 16 / 9;
+            targetAspectRatio = 9 / 16; // 在竖屏模式下，宽高比需要倒置
             break;
           case '1:1':
             targetAspectRatio = 1;
             break;
           case '4:3':
           default:
-            targetAspectRatio = 4 / 3;
+            targetAspectRatio = 3 / 4; // 在竖屏模式下，宽高比需要倒置
             break;
         }
 
-        // 在竖屏模式下的目标宽高比
-        final portraitTargetRatio = 1 / targetAspectRatio;
-
         // 获取屏幕尺寸
         final screenWidth = MediaQuery.of(context).size.width;
-        final previewHeight = screenWidth / portraitTargetRatio;
+        final screenHeight = MediaQuery.of(context).size.height;
+        final previewHeight = screenWidth / targetAspectRatio;
 
         debugPrint(
-            '拍摄比例已更改为: $ratio, 目标宽高比: $targetAspectRatio, 预览尺寸: $screenWidth x $previewHeight');
+            '目标宽高比: $targetAspectRatio, 预览尺寸: $screenWidth x $previewHeight');
+        debugPrint('屏幕尺寸: $screenWidth x $screenHeight');
 
         // 强制重新布局以确保预览框尺寸和位置正确更新
         setState(() {});
 
         // 添加短暂延迟后再次更新，确保布局完全应用
+        // 这将更新顶部按钮和缩放控制的位置
         Future.delayed(const Duration(milliseconds: 100), () {
           if (mounted) {
             setState(() {});
