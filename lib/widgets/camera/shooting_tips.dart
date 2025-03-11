@@ -18,15 +18,20 @@ class ShootingTips extends StatelessWidget {
         }
 
         // 使用Stack布局，让气泡可以浮动在屏幕上
-        return Stack(
-          children: [
-            for (int i = 0; i < tips.length; i++)
-              _FloatingTipBubble(
-                tip: tips[i],
-                index: i,
-                totalTips: tips.length,
-              ),
-          ],
+        final screenSize = MediaQuery.of(context).size;
+        return SizedBox(
+          width: screenSize.width,
+          height: screenSize.height,
+          child: Stack(
+            children: [
+              for (int i = 0; i < tips.length; i++)
+                _FloatingTipBubble(
+                  tip: tips[i],
+                  index: i,
+                  totalTips: tips.length,
+                ),
+            ],
+          ),
         );
       },
     );
@@ -152,98 +157,105 @@ class _FloatingTipBubbleState extends State<_FloatingTipBubble>
     ];
     final color = colors[widget.index % colors.length];
 
-    return Stack(
-      children: [
-        if (_isExpanded)
-          GestureDetector(
-            onTap: _toggleExpand,
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              color: Colors.transparent,
+    return SizedBox(
+      width: screenSize.width,
+      height: screenSize.height,
+      child: Stack(
+        children: [
+          if (_isExpanded)
+            GestureDetector(
+              onTap: _toggleExpand,
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                width: screenSize.width,
+                height: screenSize.height,
+                color: Colors.transparent,
+              ),
             ),
-          ),
-        Positioned(
-          left: _isExpanded
-              ? screenSize.width / 2 - bubbleSize * 0.9
-              : _originalPosition!.dx,
-          top: _isExpanded
-              ? screenSize.height / 2 - bubbleSize * 0.9
-              : _originalPosition!.dy,
-          child: GestureDetector(
-            onTap: _toggleExpand,
-            child: AnimatedBuilder(
-              animation: Listenable.merge([_expandController, _controller]),
-              builder: (context, child) {
-                return Transform.scale(
-                  scale: _scaleAnimation.value,
-                  child: SlideTransition(
-                    position: _isExpanded
-                        ? AlwaysStoppedAnimation(Offset.zero)
-                        : _floatAnimation,
-                    child: Container(
-                      width: bubbleSize * _expandAnimation.value,
-                      height: bubbleSize * _expandAnimation.value,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: color,
-                        gradient: RadialGradient(
-                          colors: [
-                            color.withOpacity(0.9),
-                            color.withOpacity(0.6),
-                          ],
-                          stops: const [0.5, 1.0],
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: color.withOpacity(0.3),
-                            blurRadius: 10,
-                            spreadRadius: 2,
+          Positioned(
+            left: _isExpanded
+                ? screenSize.width / 2 - bubbleSize * 0.9
+                : _originalPosition!.dx,
+            top: _isExpanded
+                ? screenSize.height / 2 - bubbleSize * 0.9
+                : _originalPosition!.dy,
+            child: GestureDetector(
+              onTap: _toggleExpand,
+              child: AnimatedBuilder(
+                animation: Listenable.merge([_expandController, _controller]),
+                builder: (context, child) {
+                  return Transform.scale(
+                    scale: _scaleAnimation.value,
+                    child: SlideTransition(
+                      position: _isExpanded
+                          ? AlwaysStoppedAnimation(Offset.zero)
+                          : _floatAnimation,
+                      child: Container(
+                        width: bubbleSize * _expandAnimation.value,
+                        height: bubbleSize * _expandAnimation.value,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: color,
+                          gradient: RadialGradient(
+                            colors: [
+                              color.withOpacity(0.9),
+                              color.withOpacity(0.6),
+                            ],
+                            stops: const [0.5, 1.0],
                           ),
-                        ],
-                      ),
-                      child: Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(12.0),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Flexible(
-                                child: Icon(
-                                  _getIconForType(widget.tip.type),
-                                  color: Colors.white,
-                                  size: 24 * (_isExpanded ? 1.2 : 1.0),
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Flexible(
-                                flex: 2,
-                                child: SingleChildScrollView(
-                                  padding: EdgeInsets.zero,
-                                  child: Text(
-                                    widget.tip.text,
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 12 * (_isExpanded ? 1.2 : 1.0),
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                    maxLines: _isExpanded ? 6 : 3,
-                                    overflow: TextOverflow.ellipsis,
+                          boxShadow: [
+                            BoxShadow(
+                              color: color.withOpacity(0.3),
+                              blurRadius: 10,
+                              spreadRadius: 2,
+                            ),
+                          ],
+                        ),
+                        child: Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(12.0),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Flexible(
+                                  child: Icon(
+                                    _getIconForType(widget.tip.type),
+                                    color: Colors.white,
+                                    size: 24 * (_isExpanded ? 1.2 : 1.0),
                                   ),
                                 ),
-                              ),
-                            ],
+                                const SizedBox(height: 8),
+                                Flexible(
+                                  flex: 2,
+                                  child: SingleChildScrollView(
+                                    padding: EdgeInsets.zero,
+                                    child: Text(
+                                      widget.tip.text,
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize:
+                                            12 * (_isExpanded ? 1.2 : 1.0),
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                      maxLines: _isExpanded ? 6 : 3,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                );
-              },
+                  );
+                },
+              ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 

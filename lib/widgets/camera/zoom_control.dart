@@ -16,21 +16,22 @@ class ZoomControl extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 准备缩放选项
-    final List<Map<String, dynamic>> zoomOptions = [];
+    // 准备固定缩放选项：1x、2x、5x
+    final List<Map<String, dynamic>> zoomOptions = [
+      {'level': 1.0, 'label': '1×'},
+      {'level': 2.0, 'label': '2×'},
+      {'level': 5.0, 'label': '5×'},
+    ];
 
-    // 始终添加0.5x选项
-    zoomOptions.add({'level': 0.5, 'label': '0.5×'});
+    // 格式化当前缩放值显示
+    String currentZoomLabel = '${currentZoom.toStringAsFixed(1)}×';
 
-    // 添加当前缩放值（如果接近1.0，则显示为1x）
-    if ((currentZoom - 1.0).abs() < 0.05) {
-      zoomOptions.add({'level': 1.0, 'label': '1×'});
-    } else {
-      zoomOptions.add({
-        'level': currentZoom,
-        'label': '${currentZoom.toStringAsFixed(1)}×'
-      });
-    }
+    // 检查当前缩放值是否接近某个固定选项
+    bool isFixedZoomLevel = zoomOptions.any(
+        (option) => (currentZoom - option['level'] as double).abs() < 0.05);
+
+    // 当缩放系数是小数时（非固定选项），左侧显示应该高亮
+    bool highlightCurrentZoom = !isFixedZoomLevel;
 
     return Container(
       height: 40,
@@ -39,7 +40,7 @@ class ZoomControl extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.4), // 调高透明度
+            color: Colors.black.withOpacity(0.4),
             borderRadius: BorderRadius.circular(20),
             border: Border.all(color: Colors.white.withOpacity(0.3), width: 1),
             boxShadow: [
@@ -52,16 +53,38 @@ class ZoomControl extends StatelessWidget {
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
-            children: zoomOptions.map((option) {
-              final bool isSelected = option['level'] == 0.5
-                  ? (currentZoom - 0.5).abs() < 0.05
-                  : option['level'] != 0.5;
-              return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: _buildZoomOption(
-                    option['level'], option['label'], isSelected),
-              );
-            }).toList(),
+            children: [
+              // 左侧显示当前实际缩放值
+              Padding(
+                padding: const EdgeInsets.only(right: 12, left: 4),
+                child: Text(
+                  currentZoomLabel,
+                  style: TextStyle(
+                    color: highlightCurrentZoom ? Colors.yellow : Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+
+              // 分隔线
+              Container(
+                height: 20,
+                width: 1,
+                color: Colors.white.withOpacity(0.3),
+              ),
+
+              // 固定缩放选项
+              ...zoomOptions.map((option) {
+                final bool isSelected =
+                    (currentZoom - option['level'] as double).abs() < 0.05;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: _buildZoomOption(option['level'] as double,
+                      option['label'] as String, isSelected),
+                );
+              }).toList(),
+            ],
           ),
         ),
       ),
@@ -83,7 +106,7 @@ class ZoomControl extends StatelessWidget {
           label,
           style: TextStyle(
             color: isSelected ? Colors.yellow : Colors.white,
-            fontSize: isSelected ? 14 : 12, // 调小字体大小
+            fontSize: isSelected ? 14 : 12,
             fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
           ),
         ),
