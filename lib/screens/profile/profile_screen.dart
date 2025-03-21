@@ -10,9 +10,12 @@ class ProfileScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF02051F),
       appBar: AppBar(
-        title: const Text('个人中心'),
+        title: const Text('个人中心', style: TextStyle(color: Colors.white)),
+        backgroundColor: const Color(0xFF02051F),
         elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: Consumer<CameraProvider>(
         builder: (context, cameraProvider, child) {
@@ -24,19 +27,13 @@ class ProfileScreen extends StatelessWidget {
               // 用户信息卡片
               _buildUserInfoCard(context),
 
-              const SizedBox(height: 16),
+              const SizedBox(height: 24),
 
               // 拍摄统计
               _buildSectionHeader(context, '拍摄统计'),
               _buildStatisticsCard(context, shootingCount),
 
-              const SizedBox(height: 16),
-
-              // 付费信息
-              _buildSectionHeader(context, '付费信息'),
-              _buildPaymentInfoCard(context, shootingCount),
-
-              const SizedBox(height: 16),
+              const SizedBox(height: 24),
 
               // 其他功能
               _buildSectionHeader(context, '其他功能'),
@@ -46,7 +43,8 @@ class ProfileScreen extends StatelessWidget {
 
               // 版本信息
               const Center(
-                child: Text('好好拍 v1.0.0', style: TextStyle(color: Colors.grey)),
+                child: Text('好好拍 v1.0.0',
+                    style: TextStyle(color: Colors.grey, fontSize: 12)),
               ),
               const SizedBox(height: 16),
             ],
@@ -58,96 +56,94 @@ class ProfileScreen extends StatelessWidget {
 
   // 用户信息卡片
   Widget _buildUserInfoCard(BuildContext context) {
-    return Card(
+    return Container(
       margin: const EdgeInsets.all(16),
-      elevation: 2,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(16),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            // 用户头像
-            CircleAvatar(
-              radius: 40,
-              backgroundColor: AppTheme.primaryColor.withOpacity(0.1),
-              child: Icon(
-                Icons.person,
-                size: 40,
-                color: AppTheme.primaryColor,
-              ),
+      child: Row(
+        children: [
+          // 用户头像
+          Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: AppTheme.primaryColor.withOpacity(0.2),
+              border: Border.all(color: AppTheme.primaryColor, width: 2),
             ),
-            const SizedBox(width: 16),
-            // 用户信息
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    '用户',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '普通会员',
-                    style: TextStyle(
-                      color: Colors.grey[600],
-                      fontSize: 14,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  OutlinedButton(
-                    onPressed: () {
-                      // TODO: 实现编辑资料功能
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('编辑资料功能即将上线')),
-                      );
-                    },
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppTheme.primaryColor,
-                      side: BorderSide(color: AppTheme.primaryColor),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                    ),
-                    child: const Text('编辑资料'),
-                  ),
-                ],
-              ),
+            child: const Icon(
+              Icons.person,
+              size: 40,
+              color: Colors.white,
             ),
-          ],
-        ),
+          ),
+          const SizedBox(width: 20),
+          // 用户信息
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '用户',
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '普通会员',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.7),
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton(
+                  onPressed: () {
+                    // TODO: 实现编辑资料功能
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('编辑资料功能即将上线')),
+                    );
+                  },
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Colors.white),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                  ),
+                  child: const Text('编辑资料'),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 
   // 拍摄统计卡片
   Widget _buildStatisticsCard(BuildContext context, int shootingCount) {
-    return Card(
+    return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
-      elevation: 1,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(16),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                _buildStatItem('教我拍次数', shootingCount.toString()),
-                _buildStatItem('拍摄照片',
-                    '${Provider.of<CameraProvider>(context).recentPhotos.length}张'),
-                _buildStatItem('剩余次数', '无限制'),
-              ],
-            ),
-          ],
-        ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _buildStatItem('教我拍次数', shootingCount.toString()),
+          _buildStatItem('拍摄照片',
+              '${Provider.of<CameraProvider>(context).recentPhotos.length}张'),
+          _buildStatItem('剩余次数', '无限制'),
+        ],
       ),
     );
   }
@@ -158,101 +154,18 @@ class ProfileScreen extends StatelessWidget {
       children: [
         Text(
           value,
-          style: TextStyle(
-            fontSize: 20,
+          style: const TextStyle(
+            fontSize: 22,
             fontWeight: FontWeight.bold,
-            color: AppTheme.primaryColor,
+            color: Colors.white,
           ),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 8),
         Text(
           title,
           style: TextStyle(
             fontSize: 12,
-            color: Colors.grey[600],
-          ),
-        ),
-      ],
-    );
-  }
-
-  // 付费信息卡片
-  Widget _buildPaymentInfoCard(BuildContext context, int shootingCount) {
-    // 根据拍摄次数计算费用
-    final int basicFee = 0;
-    final int additionalFee = (shootingCount / 10).floor() * 5; // 每10次额外收费5元
-    final int totalFee = basicFee + additionalFee;
-
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      elevation: 1,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              '付费方案',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 16),
-            _buildPaymentRow('基础费用', '$basicFee 元'),
-            const SizedBox(height: 8),
-            _buildPaymentRow('额外费用', '$additionalFee 元 (${shootingCount}次)'),
-            const Divider(height: 24),
-            _buildPaymentRow('总计', '$totalFee 元', isBold: true),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () {
-                  // TODO: 实现付费功能
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('付费功能即将上线')),
-                  );
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primaryColor,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                child: const Text('立即付费'),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // 付费行
-  Widget _buildPaymentRow(String title, String value, {bool isBold = false}) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          title,
-          style: TextStyle(
-            fontSize: isBold ? 16 : 14,
-            fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
-            color: isBold ? Colors.black : Colors.grey[600],
-          ),
-        ),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: isBold ? 16 : 14,
-            fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
-            color: isBold ? AppTheme.primaryColor : Colors.black,
+            color: Colors.white.withOpacity(0.7),
           ),
         ),
       ],
@@ -261,27 +174,24 @@ class ProfileScreen extends StatelessWidget {
 
   // 功能列表
   Widget _buildFunctionList(BuildContext context) {
-    return Card(
+    return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
-      elevation: 1,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
         children: [
           _buildFunctionItem(
             context,
-            Icons.history,
-            '拍摄历史',
-            '查看历史拍摄记录',
+            Icons.settings,
+            '设置',
+            '应用设置与偏好',
             () {
-              // TODO: 实现拍摄历史功能
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('拍摄历史功能即将上线')),
-              );
+              Navigator.pushNamed(context, '/settings');
             },
           ),
-          const Divider(height: 1, indent: 56),
+          Divider(height: 1, indent: 56, color: Colors.white.withOpacity(0.2)),
           _buildFunctionItem(
             context,
             Icons.card_giftcard,
@@ -294,26 +204,16 @@ class ProfileScreen extends StatelessWidget {
               );
             },
           ),
-          const Divider(height: 1, indent: 56),
+          Divider(height: 1, indent: 56, color: Colors.white.withOpacity(0.2)),
           _buildFunctionItem(
             context,
-            Icons.settings,
-            '设置',
-            '应用设置与偏好',
+            Icons.feedback_outlined,
+            '反馈',
+            '提交问题或建议',
             () {
-              Navigator.pushNamed(context, '/settings');
-            },
-          ),
-          const Divider(height: 1, indent: 56),
-          _buildFunctionItem(
-            context,
-            Icons.help_outline,
-            '帮助与反馈',
-            '获取帮助或提交反馈',
-            () {
-              // TODO: 实现帮助与反馈功能
+              // TODO: 实现反馈功能
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('帮助与反馈功能即将上线')),
+                const SnackBar(content: Text('反馈功能即将上线')),
               );
             },
           ),
@@ -331,11 +231,11 @@ class ProfileScreen extends StatelessWidget {
     VoidCallback onTap,
   ) {
     return ListTile(
-      leading: Icon(icon, color: AppTheme.primaryColor),
-      title: Text(title),
+      leading: Icon(icon, color: Colors.white),
+      title: Text(title, style: const TextStyle(color: Colors.white)),
       subtitle: Text(subtitle,
-          style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-      trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+          style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.7))),
+      trailing: const Icon(Icons.chevron_right, color: Colors.white70),
       onTap: onTap,
     );
   }
@@ -343,11 +243,11 @@ class ProfileScreen extends StatelessWidget {
   // 分区标题
   Widget _buildSectionHeader(BuildContext context, String title) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
       child: Text(
         title,
-        style: TextStyle(
-          color: AppTheme.primaryColor,
+        style: const TextStyle(
+          color: Colors.white70,
           fontWeight: FontWeight.bold,
           fontSize: 14,
         ),

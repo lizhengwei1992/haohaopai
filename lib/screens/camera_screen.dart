@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
+import 'dart:math';
 import 'package:path/path.dart' as path;
 import 'package:provider/provider.dart';
 import 'settings/settings_screen.dart';
@@ -12,6 +13,9 @@ import '../widgets/camera/shooting_tips.dart';
 import '../widgets/camera/camera_grid_lines.dart';
 import '../widgets/camera/camera_controls.dart';
 import '../widgets/camera/zoom_control.dart';
+import '../widgets/camera/focus_point.dart';
+import '../widgets/camera/camera_filters.dart';
+import '../widgets/camera/camera_control_icons.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:image/image.dart' as img;
 import '../models/photo_metadata.dart';
@@ -36,8 +40,17 @@ class _CameraScreenState extends State<CameraScreen>
   double _baseScaleLevel = 1.0;
   String _currentAspectRatio = '4:3';
 
+  // 添加滤镜相关变量
+  FilterType _currentFilter = FilterType.none;
+  bool _showFilterSelector = false;
+
   // 添加手势缩放相关变量
   double _startScale = 1.0;
+
+  // 添加对焦点相关变量
+  Offset? _focusPoint;
+  bool _showFocusPoint = false;
+  bool _focusSuccess = false;
 
   @override
   void initState() {
@@ -114,6 +127,13 @@ class _CameraScreenState extends State<CameraScreen>
 
       await cameraController.initialize();
 
+      // 设置初始对焦模式为连续自动对焦
+      try {
+        await cameraController.setFocusMode(FocusMode.auto);
+      } catch (e) {
+        debugPrint('设置初始对焦模式错误: $e');
+      }
+
       // 获取相机支持的缩放范围
       try {
         _minZoomLevel = await cameraController.getMinZoomLevel();
@@ -185,6 +205,77 @@ class _CameraScreenState extends State<CameraScreen>
       debugPrint('照片已保存: $filePath');
     } catch (e) {
       debugPrint('拍照错误: $e');
+    }
+  }
+
+  // 优化设置对焦点的方法
+  Future<void> _setFocusPoint(Offset point, BoxConstraints constraints) async {
+    if (_controller == null || !_controller!.value.isInitialized) return;
+
+    // 立即更新UI显示对焦框，不等待相机对焦完成
+    setState(() {
+      _focusPoint = point;
+      _showFocusPoint = true;
+      _focusSuccess = false; // 重置对焦状态
+    });
+
+    // 计算相对于相机预览的坐标
+    final Size previewSize = constraints.biggest;
+
+    // 将点击位置转换为相机预览的相对位置（0-1范围）
+    // 注意：相机预览可能被裁剪或缩放，需要考虑实际显示区域
+    double x = point.dx / previewSize.width;
+    double y = point.dy / previewSize.height;
+
+    // 确保坐标在0-1范围内
+    x = x.clamp(0.0, 1.0);
+    y = y.clamp(0.0, 1.0);
+
+    // 创建对焦点（相对坐标，范围0-1）
+    final focusPoint = Offset(x, y);
+
+    try {
+      // 先设置对焦模式为锁定，然后再设置为自动对焦，这样可以强制触发对焦
+      await _controller!.setFocusMode(FocusMode.locked);
+      await Future.delayed(const Duration(milliseconds: 50));
+
+      // 设置相机对焦模式和对焦点
+      await _controller!.setFocusMode(FocusMode.auto);
+      await _controller!.setFocusPoint(focusPoint);
+
+      // 设置曝光点（通常与对焦点相同）
+      await _controller!.setExposurePoint(focusPoint);
+
+      // 短暂延迟后标记对焦成功，模拟对焦过程
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      // 对焦成功，更新UI
+      if (mounted) {
+        setState(() {
+          _focusSuccess = true;
+        });
+      }
+
+      // 2.5秒后隐藏对焦框
+      Future.delayed(const Duration(milliseconds: 2500), () {
+        if (mounted) {
+          setState(() {
+            _showFocusPoint = false;
+          });
+        }
+      });
+
+      debugPrint('设置对焦点: $point, 相对位置: ($x, $y)');
+    } catch (e) {
+      debugPrint('设置对焦点错误: $e');
+      // 对焦失败，隐藏对焦框
+      if (mounted) {
+        Future.delayed(const Duration(milliseconds: 1000), () {
+          setState(() {
+            _showFocusPoint = false;
+          });
+        });
+      }
     }
   }
 
@@ -266,229 +357,283 @@ class _CameraScreenState extends State<CameraScreen>
     // 创建相机控制器的key
     final cameraControlsKey = GlobalKey<CameraControlsState>();
 
+    // 计算4:3比例下的预览框高度（用于固定位置参考）
+    final defaultPreviewHeight = screenWidth / (3.0 / 4.0); // 4:3比例下的高度
+    final defaultPreviewTop = center16_9 - defaultPreviewHeight / 2;
+    final defaultPreviewBottom = defaultPreviewTop + defaultPreviewHeight;
+
     return Scaffold(
       backgroundColor: Colors.black,
-      body: GestureDetector(
-        // 点击屏幕任意位置关闭展开框
-        onTap: () {
-          // 通过key获取CameraControls的状态并关闭展开框
-          final state = cameraControlsKey.currentState;
-          if (state != null) {
-            state.closeExpandedPanel();
-          }
-        },
-        child: Stack(
-          children: [
-            // 相机预览 - 放在最底层，位置根据固定中心点计算
-            Positioned(
-              top: previewTopPosition,
-              left: 0,
-              right: 0,
-              child: SizedBox(
-                // 设置宽度为屏幕宽度，确保水平方向充满屏幕
-                width: screenWidth,
-                // 根据宽度和宽高比计算高度
-                height: previewHeight,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      // 相机预览 - 使用正确的裁剪方式避免变形
-                      ClipRect(
-                        child: GestureDetector(
-                          // 添加手势缩放功能
-                          onScaleStart: (details) {
-                            _startScale = _currentZoomLevel;
-                          },
-                          onScaleUpdate: (details) {
-                            if (details.scale != 1.0) {
-                              // 计算新的缩放级别
-                              double newZoom = _startScale * details.scale;
+      body: Stack(
+        children: [
+          // 主要内容区域，包含相机预览和大部分UI元素
+          GestureDetector(
+            // 点击屏幕任意位置关闭展开框（只有点击到展开框以外的区域才会触发）
+            onTap: () {
+              debugPrint('点击屏幕区域');
+              // 通过key获取CameraControls的状态并关闭展开框
+              final state = cameraControlsKey.currentState;
+              if (state != null) {
+                state.closeExpandedPanel();
+              }
 
-                              // 限制缩放范围
-                              if (newZoom < _minZoomLevel) {
-                                newZoom = _minZoomLevel;
-                              } else if (newZoom > _maxZoomLevel) {
-                                newZoom = _maxZoomLevel;
-                              }
+              // 如果滤镜选择器打开，点击屏幕关闭它
+              if (_showFilterSelector) {
+                setState(() {
+                  _showFilterSelector = false;
+                });
+              }
+            },
+            child: Stack(
+              children: [
+                // 相机预览 - 放在最底层，位置根据固定中心点计算
+                Positioned(
+                  top: previewTopPosition,
+                  left: 0,
+                  right: 0,
+                  child: SizedBox(
+                    // 设置宽度为屏幕宽度，确保水平方向充满屏幕
+                    width: screenWidth,
+                    // 根据宽度和宽高比计算高度
+                    height: previewHeight,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          // 相机预览 - 使用正确的裁剪方式避免变形
+                          ClipRect(
+                            child: GestureDetector(
+                              // 优化点击对焦功能
+                              onTapDown: (TapDownDetails details) {
+                                // 获取点击位置
+                                final RenderBox box =
+                                    context.findRenderObject() as RenderBox;
+                                final Offset localPosition =
+                                    box.globalToLocal(details.globalPosition);
 
-                              // 设置新的缩放级别
-                              _setZoomLevel(newZoom);
-                            }
-                          },
-                          child: OverflowBox(
-                            alignment: Alignment.center,
-                            child: FittedBox(
-                              fit: BoxFit.cover,
-                              child: SizedBox(
-                                width: screenWidth,
-                                height: screenWidth * originalAspectRatio,
-                                child: CameraPreview(_controller!),
+                                // 计算点击位置相对于预览框的偏移
+                                final Offset adjustedPosition = Offset(
+                                    localPosition.dx,
+                                    localPosition.dy - previewTopPosition);
+
+                                // 检查点击是否在预览框内
+                                if (adjustedPosition.dy >= 0 &&
+                                    adjustedPosition.dy <= previewHeight &&
+                                    adjustedPosition.dx >= 0 &&
+                                    adjustedPosition.dx <= screenWidth) {
+                                  // 设置对焦点
+                                  _setFocusPoint(
+                                      adjustedPosition,
+                                      BoxConstraints(
+                                          maxWidth: screenWidth,
+                                          maxHeight: previewHeight));
+                                }
+                              },
+                              // 添加手势缩放功能
+                              onScaleStart: (details) {
+                                _startScale = _currentZoomLevel;
+                              },
+                              onScaleUpdate: (details) {
+                                if (details.scale != 1.0) {
+                                  // 计算新的缩放级别
+                                  double newZoom = _startScale * details.scale;
+
+                                  // 限制缩放范围
+                                  if (newZoom < _minZoomLevel) {
+                                    newZoom = _minZoomLevel;
+                                  } else if (newZoom > _maxZoomLevel) {
+                                    newZoom = _maxZoomLevel;
+                                  }
+
+                                  // 设置新的缩放级别
+                                  _setZoomLevel(newZoom);
+                                }
+                              },
+                              child: FilteredCameraPreview(
+                                filterType: _currentFilter,
+                                child: OverflowBox(
+                                  alignment: Alignment.center,
+                                  child: FittedBox(
+                                    fit: BoxFit.cover,
+                                    child: SizedBox(
+                                      width: screenWidth,
+                                      height: screenWidth * originalAspectRatio,
+                                      child: CameraPreview(_controller!),
+                                    ),
+                                  ),
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      ),
 
-                      // 相机网格线 - 移到GestureDetector之外，确保不会阻挡手势
-                      if (showGridLines)
-                        IgnorePointer(
-                          child: CameraGridLines(showGrid: true),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+                          // 相机网格线 - 移到GestureDetector之外，确保不会阻挡手势
+                          if (showGridLines)
+                            IgnorePointer(
+                              child: CameraGridLines(showGrid: true),
+                            ),
 
-            // 拍摄建议
-            if (showingTips)
-              Positioned(
-                bottom: 170, // 调整位置，与控制按钮的新位置协调
-                left: 0,
-                right: 0,
-                child: const ShootingTips(),
-              ),
-
-            // 顶部空间 - 放在Stack中，使其可以与预览框重叠，移除底色
-            Positioned(
-              top: topPadding,
-              left: 0,
-              right: 0,
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                // 移除底色
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    // 个人中心按钮
-                    GestureDetector(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const ProfileScreen(),
-                          ),
-                        );
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.5),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Icon(
-                          Icons.person,
-                          color: Colors.white,
-                          size: 24,
-                        ),
+                          // 显示对焦框
+                          if (_showFocusPoint && _focusPoint != null)
+                            FocusPoint(
+                              position: _focusPoint!,
+                              focusSuccess: _focusSuccess,
+                            ),
+                        ],
                       ),
                     ),
-
-                    // 设置按钮
-                    GestureDetector(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const SettingsScreen(),
-                          ),
-                        );
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.5),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Icon(
-                          Icons.settings,
-                          color: Colors.white,
-                          size: 24,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            // 缩放控制 - 放在Stack中，使其可以与预览框重叠，设置70%透明度
-            Positioned(
-              top: topPadding + 55, // 放在顶部按钮下方
-              left: 0,
-              right: 0,
-              child: ZoomControl(
-                currentZoom: _currentZoomLevel,
-                minZoom: _minZoomLevel,
-                maxZoom: _maxZoomLevel,
-                onZoomChanged: _setZoomLevel,
-              ),
-            ),
-
-            // 底部操作栏 - 放在Stack中，使其可以与预览框重叠
-            Positioned(
-              bottom: 30, // 调整底部间距，确保控制按钮位置合适
-              left: 0,
-              right: 0,
-              child: CameraControls(
-                key: cameraControlsKey,
-                onCapturePress: () => showingTips
-                    ? _handleCapturePress(context)
-                    : _handleTeachPress(context),
-                onTeachPress: () => _handleTeachPress(context),
-                onGalleryPress: () {
-                  if (cameraProvider.recentPhotos.isNotEmpty) {
-                    _showFullScreenImage(
-                        context, cameraProvider.recentPhotos.first.path);
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('没有最近拍摄的照片')),
-                    );
-                  }
-                },
-                onSwitchCameraPress: _switchCamera,
-                showingTips: showingTips,
-                onAspectRatioChange: (ratio) {
-                  // 处理拍摄比例变化
-                  _updateAspectRatio(ratio);
-                },
-                onExposureChange: (value) {
-                  // 处理曝光变化
-                  debugPrint('曝光值: $value');
-                  _setExposure(value);
-                },
-                onFilterChange: (filter) {
-                  // 处理滤镜变化
-                  debugPrint('滤镜: $filter');
-                },
-              ),
-            ),
-
-            // 加载指示器
-            if (analyzing)
-              Container(
-                color: Colors.black54,
-                width: double.infinity,
-                height: double.infinity,
-                child: const Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      CircularProgressIndicator(color: Colors.white),
-                      SizedBox(height: 16),
-                      Text(
-                        '正在分析...',
-                        style: TextStyle(color: Colors.white, fontSize: 16),
-                      ),
-                    ],
                   ),
                 ),
+
+                // 拍摄建议
+                if (showingTips)
+                  Positioned(
+                    bottom: 170, // 调整位置，从160改为170以适应新布局
+                    left: 0,
+                    right: 0,
+                    child: const ShootingTips(),
+                  ),
+
+                // 顶部空间 - 放在Stack中，使其可以与预览框重叠，移除底色
+                Positioned(
+                  top: topPadding,
+                  left: 0,
+                  right: 0,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 10),
+                    // 移除底色
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        // 个人中心按钮
+                        GestureDetector(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const ProfileScreen(),
+                              ),
+                            );
+                          },
+                          child: const PersonIcon(),
+                        ),
+
+                        // 相机翻转按钮（替换原来的设置按钮）
+                        GestureDetector(
+                          onTap: _switchCamera,
+                          child: Container(
+                            width: 50,
+                            height: 50,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Color.fromRGBO(100, 100, 100, 0.35),
+                            ),
+                            child: const Center(
+                              child: CameraFlipIcon(),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // 缩放控制 - 固定在默认4:3预览框下边缘往上10px的位置
+                Positioned(
+                  top: defaultPreviewBottom - 50, // 减去控件高度(40px)再减去上边距(10px)
+                  left: 0,
+                  right: 0,
+                  child: ZoomControl(
+                    currentZoom: _currentZoomLevel,
+                    minZoom: _minZoomLevel,
+                    maxZoom: _maxZoomLevel,
+                    onZoomChanged: _setZoomLevel,
+                  ),
+                ),
+
+                // 底部操作栏 - 固定在默认4:3预览框下边缘往下10px的位置
+                Positioned(
+                  top: defaultPreviewBottom + 10, // 预览框底部向下10px
+                  left: 0,
+                  right: 0,
+                  child: CameraControls(
+                    key: cameraControlsKey,
+                    onCapturePress: () => showingTips
+                        ? _handleCapturePress(context)
+                        : _handleTeachPress(context),
+                    onTeachPress: () => _handleTeachPress(context),
+                    onGalleryPress: () {
+                      if (cameraProvider.recentPhotos.isNotEmpty) {
+                        _showFullScreenImage(
+                            context, cameraProvider.recentPhotos.first.path);
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('没有最近拍摄的照片')),
+                        );
+                      }
+                    },
+                    onSwitchCameraPress: _switchCamera,
+                    onToggleFlash: _toggleFlash, // 添加闪光灯切换回调
+                    isFlashOn: _isFlashOn, // 添加闪光灯状态
+                    showingTips: showingTips,
+                    currentAspectRatio: _currentAspectRatio, // 传递当前拍摄比例
+                    onAspectRatioChange: (ratio) {
+                      // 处理拍摄比例变化
+                      _updateAspectRatio(ratio);
+                    },
+                    onExposureChange: (value) {
+                      // 处理曝光变化
+                      debugPrint('曝光值: $value');
+                      _setExposure(value);
+                    },
+                    onFilterChange: (filter) {
+                      // 处理滤镜变化 - 显示滤镜选择器
+                      if (filter == 'toggle') {
+                        _toggleFilterSelector();
+                      }
+                    },
+                    currentFilter: _currentFilter, // 传递当前滤镜
+                    showFilterSelector: _showFilterSelector, // 传递滤镜选择器状态
+                  ),
+                ),
+
+                // 加载指示器
+                if (analyzing)
+                  Container(
+                    color: Colors.black54,
+                    width: double.infinity,
+                    height: double.infinity,
+                    child: const Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          CircularProgressIndicator(color: Colors.white),
+                          SizedBox(height: 16),
+                          Text(
+                            '正在分析...',
+                            style: TextStyle(color: Colors.white, fontSize: 16),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+
+          // 滤镜选择器 - 单独放在外层Stack中，使其能够接收点击事件
+          if (_showFilterSelector)
+            Positioned(
+              bottom: 105, // 适当调整位置，从95改为105
+              left: 0,
+              right: 0,
+              child: FilterSelector(
+                currentFilter: _currentFilter,
+                onFilterChanged: _handleFilterChange,
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
@@ -722,6 +867,13 @@ class _CameraScreenState extends State<CameraScreen>
           debugPrint('原始照片宽高比与目标宽高比接近，无需裁剪');
         }
 
+        // 注意：我们不再在这里应用滤镜，而是只在预览时应用
+        // 这样可以保留原始照片的质量，用户可以在后期处理中应用滤镜
+        if (_currentFilter != FilterType.none) {
+          debugPrint(
+              '当前使用滤镜: ${CameraFilters.getFilterName(_currentFilter)}，但不在保存时应用');
+        }
+
         // 编码为PNG格式并保存
         final pngBytes = img.encodePng(croppedImage);
         final pngFile = File(pngPath);
@@ -844,6 +996,7 @@ class _CameraScreenState extends State<CameraScreen>
     }
   }
 
+  // 显示全屏图像
   void _showFullScreenImage(BuildContext context, String imagePath) {
     // 在导航前释放相机资源
     if (_controller != null && _controller!.value.isInitialized) {
@@ -868,11 +1021,13 @@ class _CameraScreenState extends State<CameraScreen>
 
   // 处理拍摄比例变化
   Future<void> _updateAspectRatio(String ratio) async {
+    debugPrint('CameraScreen 接收到新的拍摄比例: $ratio，当前比例: $_currentAspectRatio');
+
     setState(() {
       _currentAspectRatio = ratio;
     });
 
-    debugPrint('拍摄比例已更改为: $ratio');
+    debugPrint('CameraScreen 已更新状态，新比例: $_currentAspectRatio');
 
     // 如果相机控制器已初始化，尝试更新相机的拍摄比例
     if (_controller != null && _controller!.value.isInitialized) {
@@ -904,11 +1059,14 @@ class _CameraScreenState extends State<CameraScreen>
         // 强制重新布局以确保预览框尺寸和位置正确更新
         setState(() {});
 
+        debugPrint('强制刷新布局完成');
+
         // 添加短暂延迟后再次更新，确保布局完全应用
         // 这将更新顶部按钮和缩放控制的位置
         Future.delayed(const Duration(milliseconds: 100), () {
           if (mounted) {
             setState(() {});
+            debugPrint('延迟100ms后布局刷新完成');
           }
         });
 
@@ -916,12 +1074,29 @@ class _CameraScreenState extends State<CameraScreen>
         Future.delayed(const Duration(milliseconds: 300), () {
           if (mounted) {
             setState(() {});
+            debugPrint('延迟300ms后布局刷新完成');
           }
         });
       } catch (e) {
         debugPrint('设置拍摄比例错误: $e');
       }
     }
+  }
+
+  // 处理滤镜变化
+  void _handleFilterChange(FilterType filter) {
+    setState(() {
+      _currentFilter = filter;
+      _showFilterSelector = false; // 选择后自动关闭滤镜选择器
+    });
+    debugPrint('滤镜已更改为: ${CameraFilters.getFilterName(filter)}');
+  }
+
+  // 切换滤镜选择器显示状态
+  void _toggleFilterSelector() {
+    setState(() {
+      _showFilterSelector = !_showFilterSelector;
+    });
   }
 }
 

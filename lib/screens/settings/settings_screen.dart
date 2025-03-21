@@ -9,7 +9,13 @@ class SettingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('设置'), elevation: 0),
+      backgroundColor: const Color(0xFF02051F),
+      appBar: AppBar(
+        title: const Text('设置', style: TextStyle(color: Colors.white)),
+        backgroundColor: const Color(0xFF02051F),
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
       body: Consumer<SettingsProvider>(
         builder: (context, settings, child) {
           return ListView(
@@ -17,57 +23,103 @@ class SettingsScreen extends StatelessWidget {
               _buildSectionHeader(context, '相机设置'),
 
               // 网格线开关
-              SwitchListTile(
-                title: const Text('默认打开网格线'),
-                subtitle: const Text('每次打开相机时自动显示网格线'),
-                value: settings.showGridLines,
-                onChanged: (value) => settings.setShowGridLines(value),
-                activeColor: AppTheme.primaryColor,
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: SwitchListTile(
+                  title: const Text('默认打开网格线',
+                      style: TextStyle(color: Colors.white)),
+                  subtitle: Text('每次打开相机时自动显示网格线',
+                      style: TextStyle(
+                          color: Colors.white.withOpacity(0.7), fontSize: 12)),
+                  value: settings.showGridLines,
+                  onChanged: (value) => settings.setShowGridLines(value),
+                  activeColor: AppTheme.primaryColor,
+                ),
               ),
 
-              const Divider(),
-
               // 闪光灯设置
-              ListTile(
-                title: const Text('闪光灯默认设置'),
-                subtitle: const Text('每次启动应用时的闪光灯状态'),
-                trailing: DropdownButton<String>(
-                  value: '关闭',
-                  onChanged: (String? newValue) {
-                    // TODO: 实现闪光灯默认设置
-                  },
-                  items:
-                      <String>['自动', '开启', '关闭'].map<DropdownMenuItem<String>>((
-                    String value,
-                  ) {
-                    return DropdownMenuItem<String>(
-                      value: value,
-                      child: Text(value),
-                    );
-                  }).toList(),
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: ListTile(
+                  title: const Text('闪光灯默认设置',
+                      style: TextStyle(color: Colors.white)),
+                  subtitle: Text('每次启动应用时的闪光灯状态',
+                      style: TextStyle(
+                          color: Colors.white.withOpacity(0.7), fontSize: 12)),
+                  trailing: DropdownButton<String>(
+                    value: '关闭',
+                    dropdownColor: const Color(0xFF02051F),
+                    style: const TextStyle(color: Colors.white),
+                    icon:
+                        const Icon(Icons.arrow_drop_down, color: Colors.white),
+                    underline: Container(
+                      height: 1,
+                      color: Colors.white.withOpacity(0.3),
+                    ),
+                    onChanged: (String? newValue) {
+                      // TODO: 实现闪光灯默认设置
+                    },
+                    items: <String>['自动', '开启', '关闭']
+                        .map<DropdownMenuItem<String>>((
+                      String value,
+                    ) {
+                      return DropdownMenuItem<String>(
+                        value: value,
+                        child: Text(value),
+                      );
+                    }).toList(),
+                  ),
                 ),
               ),
 
               _buildSectionHeader(context, '存储设置'),
 
               // 保存到相册开关
-              SwitchListTile(
-                title: const Text('自动保存到相册'),
-                subtitle: const Text('拍照后自动保存到系统相册'),
-                value: settings.saveToGallery,
-                onChanged: (value) => settings.setSaveToGallery(value),
-                activeColor: AppTheme.primaryColor,
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: SwitchListTile(
+                  title: const Text('自动保存到相册',
+                      style: TextStyle(color: Colors.white)),
+                  subtitle: Text('拍照后自动保存到系统相册',
+                      style: TextStyle(
+                          color: Colors.white.withOpacity(0.7), fontSize: 12)),
+                  value: settings.saveToGallery,
+                  onChanged: (value) => settings.setSaveToGallery(value),
+                  activeColor: AppTheme.primaryColor,
+                ),
               ),
 
               _buildSectionHeader(context, '位置信息'),
 
               // 位置信息开关
-              SwitchListTile(
-                title: const Text('记录位置信息'),
-                subtitle: const Text('在照片中保存拍摄位置'),
-                value: settings.enableLocation,
-                onChanged: (value) => settings.setEnableLocation(value),
-                activeColor: AppTheme.primaryColor,
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: SwitchListTile(
+                  title: const Text('记录位置信息',
+                      style: TextStyle(color: Colors.white)),
+                  subtitle: Text('在照片中保存拍摄位置',
+                      style: TextStyle(
+                          color: Colors.white.withOpacity(0.7), fontSize: 12)),
+                  value: settings.enableLocation,
+                  onChanged: (value) => settings.setEnableLocation(value),
+                  activeColor: AppTheme.primaryColor,
+                ),
               ),
 
               const SizedBox(height: 24),
@@ -80,16 +132,21 @@ class SettingsScreen extends StatelessWidget {
                     final confirm = await showDialog<bool>(
                       context: context,
                       builder: (context) => AlertDialog(
-                        title: const Text('重置设置'),
-                        content: const Text('确定要将所有设置恢复为默认值吗？'),
+                        backgroundColor: const Color(0xFF121530),
+                        title: const Text('重置设置',
+                            style: TextStyle(color: Colors.white)),
+                        content: const Text('确定要将所有设置恢复为默认值吗？',
+                            style: TextStyle(color: Colors.white70)),
                         actions: [
                           TextButton(
                             onPressed: () => Navigator.pop(context, false),
-                            child: const Text('取消'),
+                            child: const Text('取消',
+                                style: TextStyle(color: Colors.white70)),
                           ),
                           TextButton(
                             onPressed: () => Navigator.pop(context, true),
-                            child: const Text('确定'),
+                            child: const Text('确定',
+                                style: TextStyle(color: Colors.red)),
                           ),
                         ],
                       ),
@@ -105,8 +162,12 @@ class SettingsScreen extends StatelessWidget {
                     }
                   },
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red,
+                    backgroundColor: Colors.red.withOpacity(0.8),
                     foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                   ),
                   child: const Text('重置所有设置'),
                 ),
@@ -116,9 +177,10 @@ class SettingsScreen extends StatelessWidget {
 
               // 版本信息
               const Center(
-                child: Text('好好拍 v1.0.0', style: TextStyle(color: Colors.grey)),
+                child: Text('好好拍 v1.0.0',
+                    style: TextStyle(color: Colors.grey, fontSize: 12)),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 16),
             ],
           );
         },
@@ -131,8 +193,8 @@ class SettingsScreen extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
       child: Text(
         title,
-        style: TextStyle(
-          color: AppTheme.primaryColor,
+        style: const TextStyle(
+          color: Colors.white70,
           fontWeight: FontWeight.bold,
           fontSize: 14,
         ),
