@@ -98,6 +98,16 @@ class CameraControlsState extends State<CameraControls> {
     debugPrint('拍摄比例已更新为: $ratio');
   }
 
+  // 切换滤镜选择器显示状态
+  void _toggleFilterSelector() {
+    debugPrint("切换滤镜选择器状态");
+    if (widget.showFilterSelector) {
+      debugPrint("滤镜选择器已打开，直接返回");
+      return;
+    }
+    widget.onFilterChange('toggle');
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -108,8 +118,9 @@ class CameraControlsState extends State<CameraControls> {
         mainAxisSize: MainAxisSize.min,
         children: [
           // 控制按钮行 - 包含展开的控制面板
-          Padding(
-            padding:
+          Container(
+            height: 50, // 固定高度，确保展开控制面板时不会撑开
+            margin:
                 const EdgeInsets.only(bottom: 45.0), // 增加底部间距从35改为45，使按钮上移10px
             child: Center(
               // 添加Center包装，确保容器居中
@@ -229,15 +240,13 @@ class CameraControlsState extends State<CameraControls> {
             },
             child: AspectRatioIcon(
               ratio: _currentAspectRatio,
-              isSelected: true, // 控制按钮中的比例图标始终显示为选中状态
+              isSelected: false, // 控制按钮中的比例图标使用白色
             ),
           ),
 
           // 滤镜按钮
           CameraControlButton(
-            onTap: () {
-              widget.onFilterChange('toggle'); // 使用特殊值'toggle'来表示切换滤镜选择器
-            },
+            onTap: _toggleFilterSelector,
             child: const FilterIcon(),
           ),
         ],
@@ -256,10 +265,11 @@ class CameraControlsState extends State<CameraControls> {
       return Center(
         child: Container(
           width: MediaQuery.of(context).size.width * 0.8, // 设置为屏幕宽度的80%
-          height: 50, // 固定高度为50
+          height: 45, // 固定高度为45，比父容器的50略小
           decoration: BoxDecoration(
-            color: Color.fromRGBO(120, 120, 120, 0.6), // 灰色半透明背景
-            borderRadius: BorderRadius.circular(25), // 圆角矩形
+            color:
+                Color.fromRGBO(120, 120, 120, 0.35), // 降低透明度从0.6改为0.35，与拍摄按钮一致
+            borderRadius: BorderRadius.circular(22.5), // 圆角矩形
           ),
           child: Row(
             children: [
@@ -305,9 +315,14 @@ class CameraControlsState extends State<CameraControls> {
                         debugPrint('面板已关闭，当前比例: $_currentAspectRatio');
                       },
                       child: Container(
-                        width: 38,
-                        height: 38,
+                        width: 45, // 增大宽度从38到45
+                        height: 45, // 增大高度从38到45，使用父容器的最大高度
                         margin: EdgeInsets.symmetric(horizontal: 4),
+                        // 添加点击效果
+                        decoration: BoxDecoration(
+                          color: Colors.transparent, // 移除选中时的黑色背景效果，保持完全透明
+                          borderRadius: BorderRadius.circular(22.5),
+                        ),
                         child: Center(
                           child: AspectRatioIcon(
                             ratio: ratio,
@@ -333,28 +348,15 @@ class CameraControlsState extends State<CameraControls> {
         child: Container(
           width: MediaQuery.of(context).size.width,
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+          // 设置固定高度为40，使其更加紧凑
+          height: 40,
+          child: Stack(
             children: [
-              // 曝光值指示器
-              Container(
-                width: double.infinity,
-                height: 24,
-                alignment: Alignment.center,
-                child: Text(
-                  _currentExposure.toStringAsFixed(1),
-                  style: TextStyle(
-                    color: Colors.yellow,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              // 自定义曝光控制器 - 居中显示并设置为屏幕宽度的80%
+              // 曝光控制器 - 居中显示并设置为屏幕宽度的65%（从70%减小）
               Center(
                 child: Container(
-                  width: MediaQuery.of(context).size.width * 0.8, // 设置为屏幕宽度的80%
+                  width: MediaQuery.of(context).size.width * 0.65, // 从70%减小到65%
+                  height: 40,
                   child: ExposureControl(
                     value: _currentExposure,
                     onChanged: (value) {
@@ -366,6 +368,30 @@ class CameraControlsState extends State<CameraControls> {
                     onChangeEnd: () {
                       // 移除自动关闭功能，允许用户继续调整而不会自动关闭
                     },
+                  ),
+                ),
+              ),
+
+              // 曝光值指示器 - 放在更靠右的位置
+              Positioned(
+                right: 0, // 从10改为0，更靠近屏幕右侧
+                top: 0,
+                bottom: 0,
+                child: Container(
+                  padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.black45,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Center(
+                    child: Text(
+                      _currentExposure.toStringAsFixed(1),
+                      style: TextStyle(
+                        color: Colors.yellow,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -444,15 +470,15 @@ class _ExposureControlState extends State<ExposureControl> {
 
   // 将值四舍五入到最近的刻度线
   double _roundToNearestTick(double value) {
-    // 刻度间隔为0.2（从-2.0到2.0，总共21个刻度）
-    const double tickInterval = 0.2;
+    // 计算刻度间隔（从-2.0到2.0，总共19个刻度）
+    const double tickInterval = 4.0 / 18; // 4.0是总范围(-2.0到2.0)，18是间隔数量
     return (value / tickInterval).round() * tickInterval;
   }
 
   void _updateValue(double dx) {
     // 计算拖动的相对距离，转换为曝光值变化
     final double controlWidth =
-        MediaQuery.of(context).size.width * 0.8; // 控件宽度为屏幕宽度的80%
+        MediaQuery.of(context).size.width * 0.65; // 控件宽度为屏幕宽度的65%
     final double dragDistance = dx - _startDragX;
 
     // 如果拖动距离太小，忽略这次更新
@@ -461,8 +487,8 @@ class _ExposureControlState extends State<ExposureControl> {
     }
 
     // 将拖动距离映射到曝光值变化
-    // 进一步降低灵敏度：控件宽度的1/2对应1.0的曝光值变化
-    final double valueChange = dragDistance / (controlWidth / 2);
+    // 降低灵敏度：控件宽度的2/3对应1.0的曝光值变化
+    final double valueChange = dragDistance / (controlWidth * 2 / 3);
 
     // 计算新的曝光值
     double newValue = _currentValue + valueChange;
@@ -506,17 +532,19 @@ class _ExposureControlState extends State<ExposureControl> {
   // 根据点击位置计算相应的曝光值
   double _getValueFromPosition(double x) {
     final double width =
-        MediaQuery.of(context).size.width * 0.8; // 控件宽度为屏幕宽度的80%
+        MediaQuery.of(context).size.width * 0.65; // 控件宽度为屏幕宽度的65%
 
     // 计算刻度线位置
-    final int tickCount = 21; // 总共21个刻度(中间±10)
+    final int tickCount = 19; // 总共19个刻度(中间±9)
     final double tickSpacing = width / (tickCount - 1);
 
     // 找到最近的刻度线索引
     int nearestTickIndex = ((x / tickSpacing).round()).clamp(0, tickCount - 1);
 
     // 计算对应的曝光值 (-2.0到2.0)
-    return ((nearestTickIndex - (tickCount ~/ 2)) * 0.2).clamp(-2.0, 2.0);
+    // 调整计算方式以适应19个刻度线
+    return (((nearestTickIndex - (tickCount ~/ 2)) * 4.0) / (tickCount - 1))
+        .clamp(-2.0, 2.0);
   }
 
   @override
@@ -560,7 +588,7 @@ class _ExposureControlState extends State<ExposureControl> {
       },
       child: Container(
         width: double.infinity,
-        height: 60,
+        height: 40, // 将高度从60减少到40
         color: Colors.transparent,
         child: CustomPaint(
           painter: ExposureControlPainter(
@@ -589,8 +617,8 @@ class ExposureControlPainter extends CustomPainter {
     final double height = size.height;
     final double center = width / 2;
 
-    // 刻度线基本设置
-    final int tickCount = 21; // 总共21个刻度(中间±10)
+    // 刻度线基本设置 - 减少刻度数量，增强可视化效果
+    final int tickCount = 19; // 总共19个刻度(中间±9)，从21减少
     final double tickSpacing = width / (tickCount - 1);
 
     // 计算当前值对应的刻度索引
@@ -608,7 +636,7 @@ class ExposureControlPainter extends CustomPainter {
       ..strokeWidth = 2.0
       ..style = PaintingStyle.stroke;
 
-    // 绘制刻度线
+    // 绘制刻度线 - 保持相同的相对高度，但宽度变小
     for (int i = 0; i < tickCount; i++) {
       final double x = i * tickSpacing;
       final bool isCenter = i == tickCount ~/ 2;
@@ -616,11 +644,11 @@ class ExposureControlPainter extends CustomPainter {
 
       double tickHeight;
       if (isCenter) {
-        // 中间刻度线高度为控件高度的60%
-        tickHeight = height * 0.6;
+        // 中间刻度线高度稍微增加，让其更加突出
+        tickHeight = height * 0.45;
       } else {
-        // 两侧刻度线高度为中间刻度线的1/3，大约20%的控件高度
-        tickHeight = height * 0.2;
+        // 两侧刻度线高度略微增加
+        tickHeight = height * 0.15;
       }
 
       final double startY = (height - tickHeight) / 2;

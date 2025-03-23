@@ -3,6 +3,7 @@ import 'package:camera/camera.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 import 'package:path/path.dart' as path;
 import 'package:provider/provider.dart';
 import 'settings/settings_screen.dart';
@@ -522,17 +523,7 @@ class _CameraScreenState extends State<CameraScreen>
                         // 相机翻转按钮（替换原来的设置按钮）
                         GestureDetector(
                           onTap: _switchCamera,
-                          child: Container(
-                            width: 50,
-                            height: 50,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: Color.fromRGBO(100, 100, 100, 0.35),
-                            ),
-                            child: const Center(
-                              child: CameraFlipIcon(),
-                            ),
-                          ),
+                          child: const CameraFlipIcon(), // 直接使用图标，移除底部圆形区域
                         ),
                       ],
                     ),
@@ -625,12 +616,29 @@ class _CameraScreenState extends State<CameraScreen>
           // 滤镜选择器 - 单独放在外层Stack中，使其能够接收点击事件
           if (_showFilterSelector)
             Positioned(
-              bottom: 105, // 适当调整位置，从95改为105
+              bottom: 120, // 从105调整到120，确保不与拍摄按钮重叠
               left: 0,
               right: 0,
               child: FilterSelector(
                 currentFilter: _currentFilter,
                 onFilterChanged: _handleFilterChange,
+                // 使用实时相机预览而不是静态图片
+                cameraPreviewWidget:
+                    _controller != null && _controller!.value.isInitialized
+                        ? SizedBox(
+                            width: 50,
+                            height: 50,
+                            child: FittedBox(
+                              fit: BoxFit.cover,
+                              child: SizedBox(
+                                width: MediaQuery.of(context).size.width,
+                                height: MediaQuery.of(context).size.width *
+                                    _controller!.value.aspectRatio,
+                                child: CameraPreview(_controller!),
+                              ),
+                            ),
+                          )
+                        : null,
               ),
             ),
         ],
@@ -642,11 +650,23 @@ class _CameraScreenState extends State<CameraScreen>
   Future<void> _switchCamera() async {
     if (_cameras.length < 2) return;
 
+    debugPrint('开始切换相机...');
+
+    // 确保当前相机不为空
+    if (_controller == null || !_controller!.value.isInitialized) {
+      debugPrint('相机控制器未初始化，无法切换');
+      return;
+    }
+
     final int currentIndex = _cameras.indexOf(_controller!.description);
     final int newIndex = (currentIndex + 1) % _cameras.length;
 
+    debugPrint('当前相机索引: $currentIndex, 新相机索引: $newIndex');
+
+    // 释放现有控制器资源
     await _controller?.dispose();
 
+    // 创建新的相机控制器
     final CameraController cameraController = CameraController(
       _cameras[newIndex],
       ResolutionPreset.max,
@@ -654,10 +674,14 @@ class _CameraScreenState extends State<CameraScreen>
       imageFormatGroup: ImageFormatGroup.yuv420,
     );
 
+    // 更新控制器引用
     _controller = cameraController;
 
     try {
+      // 初始化新相机
       await cameraController.initialize();
+
+      // 获取新相机的缩放范围
       _minZoomLevel = await cameraController.getMinZoomLevel();
       _maxZoomLevel = await cameraController.getMaxZoomLevel();
 
@@ -666,10 +690,16 @@ class _CameraScreenState extends State<CameraScreen>
         _minZoomLevel = 1.0;
       }
 
+      // 重置缩放级别为默认值1.0
+      await cameraController.setZoomLevel(1.0);
+
+      debugPrint('新相机初始化成功，缩放范围: $_minZoomLevel 到 $_maxZoomLevel');
+
       if (mounted) {
         setState(() {
           _isInitialized = true;
           _currentZoomLevel = 1.0;
+          _isFlashOn = false; // 重置闪光灯状态
         });
       }
     } catch (e) {
@@ -1085,17 +1115,28 @@ class _CameraScreenState extends State<CameraScreen>
 
   // 处理滤镜变化
   void _handleFilterChange(FilterType filter) {
+    // 选择后自动关闭滤镜选择器
     setState(() {
       _currentFilter = filter;
-      _showFilterSelector = false; // 选择后自动关闭滤镜选择器
+      _showFilterSelector = false;
     });
+
+    // 使用选定的滤镜
     debugPrint('滤镜已更改为: ${CameraFilters.getFilterName(filter)}');
   }
 
   // 切换滤镜选择器显示状态
   void _toggleFilterSelector() {
+    // 直接切换滤镜选择器状态，不再使用takePicture
     setState(() {
       _showFilterSelector = !_showFilterSelector;
+
+      // 如果打开滤镜选择器，临时保存当前选择的滤镜
+      if (_showFilterSelector) {
+        debugPrint('显示滤镜选择器');
+      } else {
+        debugPrint('隐藏滤镜选择器');
+      }
     });
   }
 }

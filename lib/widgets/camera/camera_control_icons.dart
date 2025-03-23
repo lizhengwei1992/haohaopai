@@ -18,8 +18,8 @@ class CameraControlButton extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 50,
-        height: 50,
+        width: 45,
+        height: 45,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           color: Color.fromRGBO(100, 100, 100, 0.35),
@@ -139,8 +139,8 @@ class AspectRatioIcon extends StatelessWidget {
       ratio,
       style: TextStyle(
         color: isSelected ? Colors.yellow : Colors.white,
-        fontSize: 14,
-        fontWeight: FontWeight.w500,
+        fontSize: 16,
+        fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
       ),
     );
   }
@@ -201,10 +201,12 @@ class PersonIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Icon(
-      Icons.account_circle_rounded,
-      color: Colors.white,
-      size: 28, // 稍微增大图标尺寸，使其在没有背景时更加明显
+    // 使用SVG图标替换原来的Icon
+    return SvgPicture.asset(
+      'assets/icons/profile.svg',
+      width: 24,
+      height: 24,
+      colorFilter: const ColorFilter.mode(Colors.white, BlendMode.srcIn),
     );
   }
 }
