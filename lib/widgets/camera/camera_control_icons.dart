@@ -152,9 +152,6 @@ class FilterIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 添加调试信息
-    debugPrint('尝试加载滤镜图标: assets/icons/camera_fliter.svg');
-
     try {
       return SvgPicture.asset(
         'assets/icons/camera_fliter.svg',
@@ -207,6 +204,20 @@ class PersonIcon extends StatelessWidget {
       width: 24,
       height: 24,
       colorFilter: const ColorFilter.mode(Colors.white, BlendMode.srcIn),
+    );
+  }
+}
+
+/// 魔法（教我拍）图标
+class MagicIcon extends StatelessWidget {
+  const MagicIcon({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return SvgPicture.asset(
+      'assets/icons/magic.svg',
+      width: 96,
+      height: 96,
     );
   }
 }

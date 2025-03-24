@@ -53,11 +53,19 @@ class _CameraScreenState extends State<CameraScreen>
   bool _showFocusPoint = false;
   bool _focusSuccess = false;
 
+  // 添加摄像头类型识别变量
+  int _currentCameraIndex = 0; // 当前摄像头索引
+  bool _hasUltraWideCamera = false; // 是否有超广角摄像头
+  int _standardCameraIndex = 0; // 标准摄像头索引
+  int _ultraWideCameraIndex = -1; // 超广角摄像头索引
+  int _frontCameraIndex = -1; // 前置摄像头索引
+  bool _isUltraWideMode = false; // 是否是超广角模式
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _initializeCamera();
+    _analyzeCameras();
 
     // 加载应用相册中的照片
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -110,21 +118,64 @@ class _CameraScreenState extends State<CameraScreen>
     }
   }
 
-  Future<void> _initializeCamera() async {
+  // 分析可用的摄像头，识别超广角、标准和前置摄像头
+  Future<void> _analyzeCameras() async {
     try {
       _cameras = await availableCameras();
       if (_cameras.isEmpty) {
         return;
       }
 
+      // 初始化摄像头索引
+      _standardCameraIndex = 0; // 默认第一个是标准后置摄像头
+
+      // 遍历所有摄像头，识别前置和可能的超广角
+      for (int i = 0; i < _cameras.length; i++) {
+        final camera = _cameras[i];
+
+        // 判断是否是前置摄像头
+        if (camera.lensDirection == CameraLensDirection.front) {
+          _frontCameraIndex = i;
+          debugPrint('发现前置摄像头，索引: $i, 名称: ${camera.name}');
+        }
+
+        // 尝试通过摄像头名称识别超广角
+        final String cameraName = camera.name.toLowerCase();
+        if (camera.lensDirection == CameraLensDirection.back &&
+            (cameraName.contains('ultra') ||
+                cameraName.contains('wide') ||
+                cameraName.contains('0.5'))) {
+          _ultraWideCameraIndex = i;
+          _hasUltraWideCamera = true;
+          debugPrint('发现可能的超广角摄像头，索引: $i, 名称: ${camera.name}');
+        }
+      }
+
+      debugPrint(
+          '摄像头分析结果: 标准=$_standardCameraIndex, 超广角=$_ultraWideCameraIndex, 前置=$_frontCameraIndex');
+
+      // 初始化相机
+      _initializeCamera();
+    } catch (e) {
+      debugPrint('分析摄像头错误: $e');
+    }
+  }
+
+  Future<void> _initializeCamera() async {
+    try {
+      if (_cameras.isEmpty) {
+        return;
+      }
+
       final CameraController cameraController = CameraController(
-        _cameras[0],
+        _cameras[_standardCameraIndex],
         ResolutionPreset.max,
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.yuv420,
       );
 
       _controller = cameraController;
+      _currentCameraIndex = _standardCameraIndex;
 
       await cameraController.initialize();
 
@@ -175,10 +226,41 @@ class _CameraScreenState extends State<CameraScreen>
     }
   }
 
+  // 增强版设置缩放级别，支持智能切换超广角
   Future<void> _setZoomLevel(double zoom) async {
-    if (_controller == null) return;
+    if (_controller == null || !_controller!.value.isInitialized) return;
 
     try {
+      // 如果设备有超广角摄像头，且当前在标准摄像头，且缩放小于0.9
+      if (_hasUltraWideCamera &&
+          zoom < 0.9 &&
+          _currentCameraIndex == _standardCameraIndex &&
+          !_isUltraWideMode) {
+        debugPrint('缩放级别低于0.9，切换至超广角摄像头');
+        await _switchToCamera(_ultraWideCameraIndex);
+        _isUltraWideMode = true;
+        // 超广角模式缩放级别设置为最大值1.0
+        await _controller!.setZoomLevel(1.0);
+        setState(() {
+          _currentZoomLevel = 1.0;
+        });
+        return;
+      }
+
+      // 如果在超广角模式，缩放级别大于1.1，切回标准摄像头
+      if (_isUltraWideMode && zoom > 1.1) {
+        debugPrint('缩放级别高于1.1，从超广角切回标准摄像头');
+        await _switchToCamera(_standardCameraIndex);
+        _isUltraWideMode = false;
+        // 设置标准摄像头初始缩放为1.0
+        await _controller!.setZoomLevel(1.0);
+        setState(() {
+          _currentZoomLevel = 1.0;
+        });
+        return;
+      }
+
+      // 正常情况下直接调整缩放
       await _controller!.setZoomLevel(zoom);
       setState(() {
         _currentZoomLevel = zoom;
@@ -186,6 +268,89 @@ class _CameraScreenState extends State<CameraScreen>
     } catch (e) {
       debugPrint('设置缩放级别错误: $e');
     }
+  }
+
+  // 切换到指定索引的摄像头
+  Future<void> _switchToCamera(int cameraIndex) async {
+    if (cameraIndex < 0 || cameraIndex >= _cameras.length) {
+      debugPrint('无效的摄像头索引: $cameraIndex');
+      return;
+    }
+
+    // 如果是同一个摄像头，无需切换
+    if (_currentCameraIndex == cameraIndex &&
+        _controller != null &&
+        _controller!.value.isInitialized) {
+      return;
+    }
+
+    debugPrint('切换到摄像头索引: $cameraIndex, 名称: ${_cameras[cameraIndex].name}');
+
+    // 释放现有控制器资源
+    await _controller?.dispose();
+
+    // 创建新的相机控制器
+    final CameraController cameraController = CameraController(
+      _cameras[cameraIndex],
+      ResolutionPreset.max,
+      enableAudio: false,
+      imageFormatGroup: ImageFormatGroup.yuv420,
+    );
+
+    // 更新控制器引用
+    _controller = cameraController;
+    _currentCameraIndex = cameraIndex;
+
+    try {
+      // 初始化新相机
+      await cameraController.initialize();
+
+      // 获取新相机的缩放范围
+      _minZoomLevel = await cameraController.getMinZoomLevel();
+      _maxZoomLevel = await cameraController.getMaxZoomLevel();
+
+      // 确保最小缩放级别为1.0
+      if (_minZoomLevel < 1.0) {
+        _minZoomLevel = 1.0;
+      }
+
+      if (mounted) {
+        setState(() {
+          _isInitialized = true;
+          _currentZoomLevel = 1.0;
+          _isFlashOn = false; // 重置闪光灯状态
+        });
+      }
+    } catch (e) {
+      debugPrint('切换相机错误: $e');
+    }
+  }
+
+  // 修改切换相机方法，只在前置和后置标准摄像头之间切换
+  Future<void> _switchCamera() async {
+    if (_cameras.length < 2) return;
+
+    debugPrint('开始切换前后摄像头...');
+
+    // 确保当前相机不为空
+    if (_controller == null || !_controller!.value.isInitialized) {
+      debugPrint('相机控制器未初始化，无法切换');
+      return;
+    }
+
+    // 如果当前是前置摄像头，切换到后置标准摄像头
+    if (_currentCameraIndex == _frontCameraIndex) {
+      debugPrint('从前置切换到后置标准摄像头');
+      await _switchToCamera(_standardCameraIndex);
+    }
+    // 否则切换到前置摄像头
+    else {
+      debugPrint('从后置切换到前置摄像头');
+      await _switchToCamera(_frontCameraIndex);
+    }
+
+    // 重置超广角模式标志
+    _isUltraWideMode = false;
   }
 
   Future<void> _takePhoto() async {
@@ -550,9 +715,7 @@ class _CameraScreenState extends State<CameraScreen>
                   right: 0,
                   child: CameraControls(
                     key: cameraControlsKey,
-                    onCapturePress: () => showingTips
-                        ? _handleCapturePress(context)
-                        : _handleTeachPress(context),
+                    onCapturePress: () => _handleCapturePress(context),
                     onTeachPress: () => _handleTeachPress(context),
                     onGalleryPress: () {
                       if (cameraProvider.recentPhotos.isNotEmpty) {
@@ -644,67 +807,6 @@ class _CameraScreenState extends State<CameraScreen>
         ],
       ),
     );
-  }
-
-  // 切换前后摄像头
-  Future<void> _switchCamera() async {
-    if (_cameras.length < 2) return;
-
-    debugPrint('开始切换相机...');
-
-    // 确保当前相机不为空
-    if (_controller == null || !_controller!.value.isInitialized) {
-      debugPrint('相机控制器未初始化，无法切换');
-      return;
-    }
-
-    final int currentIndex = _cameras.indexOf(_controller!.description);
-    final int newIndex = (currentIndex + 1) % _cameras.length;
-
-    debugPrint('当前相机索引: $currentIndex, 新相机索引: $newIndex');
-
-    // 释放现有控制器资源
-    await _controller?.dispose();
-
-    // 创建新的相机控制器
-    final CameraController cameraController = CameraController(
-      _cameras[newIndex],
-      ResolutionPreset.max,
-      enableAudio: false,
-      imageFormatGroup: ImageFormatGroup.yuv420,
-    );
-
-    // 更新控制器引用
-    _controller = cameraController;
-
-    try {
-      // 初始化新相机
-      await cameraController.initialize();
-
-      // 获取新相机的缩放范围
-      _minZoomLevel = await cameraController.getMinZoomLevel();
-      _maxZoomLevel = await cameraController.getMaxZoomLevel();
-
-      // 确保最小缩放级别为1.0
-      if (_minZoomLevel < 1.0) {
-        _minZoomLevel = 1.0;
-      }
-
-      // 重置缩放级别为默认值1.0
-      await cameraController.setZoomLevel(1.0);
-
-      debugPrint('新相机初始化成功，缩放范围: $_minZoomLevel 到 $_maxZoomLevel');
-
-      if (mounted) {
-        setState(() {
-          _isInitialized = true;
-          _currentZoomLevel = 1.0;
-          _isFlashOn = false; // 重置闪光灯状态
-        });
-      }
-    } catch (e) {
-      debugPrint('切换相机错误: $e');
-    }
   }
 
   // 设置曝光值
@@ -930,99 +1032,119 @@ class _CameraScreenState extends State<CameraScreen>
     }
 
     final cameraProvider = Provider.of<CameraProvider>(context, listen: false);
+    final startTime = DateTime.now(); // 记录开始时间
+    debugPrint('📸 教我拍流程开始: ${startTime.toString()}');
+
+    // 打印相机画面的实际分辨率
+    final cameraResolution = _controller!.value.previewSize;
+    debugPrint(
+        '📸 相机画面的实际分辨率: ${cameraResolution?.width} x ${cameraResolution?.height}');
 
     try {
-      // 拍照
+      // 设置状态为分析中
+      cameraProvider.setUploadState(UploadState.uploading);
+
+      // 使用直接获取低分辨率图像的方式
+      debugPrint('📸 开始获取低分辨率图像...');
+      final lowResStartTime = DateTime.now();
+
+      // 尝试直接从相机获取预览图像并调整大小
       final XFile photo = await _controller!.takePicture();
+      debugPrint(
+          '📸 拍照完成: ${DateTime.now().difference(lowResStartTime).inMilliseconds}ms');
 
-      // 直接将原始图像数据保存为PNG格式，并应用裁剪
-      final String pngPath = await _saveAsPng(photo.path, _currentAspectRatio);
+      final bytes = await photo.readAsBytes();
+      debugPrint(
+          '📸 图像读取到内存: ${DateTime.now().difference(lowResStartTime).inMilliseconds}ms');
 
-      // 保存原始照片路径，以便后续使用
-      cameraProvider.setOriginalPhotoPath(pngPath);
+      // 直接调整图像大小至较低分辨率
+      final resizedBytes = await _resizeImageFast(bytes, targetWidth: 640);
+      final resizeEndTime = DateTime.now();
+      debugPrint(
+          '📸 图像缩放完成: ${resizeEndTime.difference(lowResStartTime).inMilliseconds}ms');
+      debugPrint('📸 低分辨率图像大小: ${resizedBytes.length / 1024}KB');
 
-      // 压缩照片用于AI分析，减少传输时间
-      final compressedPath = await _compressImageForAnalysis(pngPath);
+      // 计算并打印从点击到发起HTTP请求的总耗时
+      final requestStartTime = DateTime.now();
+      debugPrint(
+          '📸 从点击按钮到准备发起HTTP请求总耗时: ${requestStartTime.difference(startTime).inMilliseconds}ms');
 
-      // 分析照片
-      await cameraProvider.analyzeImage(compressedPath);
+      // 调用AI分析服务
+      await cameraProvider.analyzeImageBytes(resizedBytes);
+      final analysisEndTime = DateTime.now();
 
-      // 分析完成后删除临时压缩文件
-      if (compressedPath != pngPath) {
-        await File(compressedPath).delete().catchError((e) {
-          debugPrint('删除临时压缩文件出错: $e');
-        });
+      // 打印HTTP请求的耗时
+      debugPrint(
+          '📸 HTTP请求耗时: ${analysisEndTime.difference(requestStartTime).inMilliseconds}ms');
+
+      // 设置上传状态为成功
+      cameraProvider.setUploadState(UploadState.success);
+
+      // 计算整个流程的总耗时
+      final totalTime = DateTime.now().difference(startTime).inMilliseconds;
+      debugPrint('📸 教我拍流程完成，总耗时: ${totalTime}ms');
+    } catch (e) {
+      debugPrint('📸 教我拍照错误: $e');
+      cameraProvider.setUploadState(UploadState.error);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('无法分析照片，请重试')),
+        );
       }
 
-      debugPrint('照片已分析: $pngPath');
-    } catch (e) {
-      debugPrint('教我拍照错误: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('无法分析照片，请重试')),
-      );
+      // 记录错误时的总耗时
+      final totalTime = DateTime.now().difference(startTime).inMilliseconds;
+      debugPrint('📸 教我拍流程失败，总耗时: ${totalTime}ms');
     }
   }
 
-  // 压缩图像用于AI分析
-  Future<String> _compressImageForAnalysis(String imagePath,
-      {int quality = 80}) async {
+  // 快速调整图像大小 - 比压缩更高效
+  Future<Uint8List> _resizeImageFast(Uint8List imageBytes,
+      {required int targetWidth}) async {
+    final resizeStartTime = DateTime.now();
+
     try {
-      final file = File(imagePath);
-      final dir = await getTemporaryDirectory();
-      final targetPath =
-          '${dir.path}/analysis_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      // 解码图像
+      final img.Image? originalImage = img.decodeImage(imageBytes);
+      if (originalImage == null) return imageBytes;
 
-      // 获取原始文件大小
-      final originalSize = await file.length();
-      debugPrint('AI分析原始图片大小: ${(originalSize / 1024).toStringAsFixed(1)}KB');
+      // 打印原始图像分辨率
+      debugPrint(
+          '📸 原始图像分辨率: ${originalImage.width} x ${originalImage.height}');
 
-      // 如果原始文件已经小于300KB，直接返回
-      if (originalSize < 300 * 1024) {
-        debugPrint('图片已经足够小，无需压缩用于AI分析');
-        return imagePath;
-      }
+      // 计算目标高度，保持纵横比
+      final int targetHeight =
+          (originalImage.height * targetWidth / originalImage.width).round();
 
-      // 根据原始图片大小动态调整压缩质量
-      int dynamicQuality = quality;
-      if (originalSize > 3 * 1024 * 1024) {
-        // 大于3MB
-        dynamicQuality = 70;
-      } else if (originalSize > 1 * 1024 * 1024) {
-        // 大于1MB
-        dynamicQuality = 75;
-      }
-
-      final result = await FlutterImageCompress.compressAndGetFile(
-        file.absolute.path,
-        targetPath,
-        quality: dynamicQuality,
-        // 保持较高的分辨率以确保AI分析质量
-        minWidth: 1280,
-        minHeight: 1280,
-        format: CompressFormat.jpeg,
+      // 调整大小 - 使用最快的调整算法
+      final img.Image resizedImage = img.copyResize(
+        originalImage,
+        width: targetWidth,
+        height: targetHeight,
+        interpolation: img.Interpolation.nearest, // 最快的插值算法
       );
 
-      if (result == null) return imagePath;
-
-      // 检查压缩后的文件大小
-      final compressedSize = await result.length();
-      final savingPercentage =
-          ((originalSize - compressedSize) / originalSize * 100)
-              .toStringAsFixed(1);
+      // 打印请求服务的图像分辨率
       debugPrint(
-          'AI分析图片压缩: 原始大小 ${(originalSize / 1024).toStringAsFixed(1)}KB, 压缩后 ${(compressedSize / 1024).toStringAsFixed(1)}KB, 节省 $savingPercentage%');
+          '📸 请求服务的图像分辨率: ${resizedImage.width} x ${resizedImage.height}');
 
-      // 如果压缩后仍然超过800KB且质量大于60，递归压缩，降低质量
-      if (compressedSize > 800 * 1024 && dynamicQuality > 60) {
-        await File(result.path).delete();
-        return _compressImageForAnalysis(imagePath,
-            quality: dynamicQuality - 10);
-      }
+      // 编码为JPEG - 比PNG更快，文件更小
+      final Uint8List result = Uint8List.fromList(img.encodeJpg(
+        resizedImage,
+        quality: 85, // 适中的质量，平衡大小和视觉效果
+      ));
 
-      return result.path;
+      final resizeDuration =
+          DateTime.now().difference(resizeStartTime).inMilliseconds;
+      debugPrint('📸 快速图像尺寸调整耗时: ${resizeDuration}ms');
+      debugPrint(
+          '📸 调整后图像大小: ${result.length / 1024}KB, 尺寸: ${targetWidth}x${targetHeight}');
+
+      return result;
     } catch (e) {
-      debugPrint('压缩图像出错: $e');
-      return imagePath;
+      debugPrint('📸 调整图像大小出错: $e');
+      return imageBytes;
     }
   }
 

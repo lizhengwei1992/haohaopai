@@ -120,8 +120,7 @@ class CameraControlsState extends State<CameraControls> {
           // 控制按钮行 - 包含展开的控制面板
           Container(
             height: 50, // 固定高度，确保展开控制面板时不会撑开
-            margin:
-                const EdgeInsets.only(bottom: 45.0), // 增加底部间距从35改为45，使按钮上移10px
+            margin: const EdgeInsets.only(bottom: 30.0), // 调整到30px，适当移动
             child: Center(
               // 添加Center包装，确保容器居中
               child: GestureDetector(
@@ -139,60 +138,119 @@ class CameraControlsState extends State<CameraControls> {
 
           // 拍摄按钮行
           Padding(
-            padding: const EdgeInsets.only(bottom: 15.0), // 保持底部间距
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            padding: const EdgeInsets.only(bottom: 30.0), // 调整到30px，适当移动
+            child: Stack(
+              alignment: Alignment.center, // 确保中心按钮居中
               children: [
-                // 左侧预览相册按钮
-                Consumer<CameraProvider>(
-                  builder: (context, provider, child) {
-                    final hasRecentPhotos = provider.recentPhotos.isNotEmpty;
+                // 中间拍摄按钮 - 一定在中心
+                Center(child: _buildCaptureButton()),
 
-                    return GestureDetector(
-                      onTap: widget.onGalleryPress,
-                      child: Container(
-                        width: 38, // 将宽度从40缩小到38
-                        height: 38, // 将高度从40缩小到38
-                        margin:
-                            const EdgeInsets.only(right: 28), // 调整右边距从30改为28
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Colors.black.withOpacity(0.5),
-                          border: Border.all(
-                              color: Colors.white.withOpacity(0.5), width: 1),
-                        ),
-                        child: hasRecentPhotos
-                            ? ClipOval(
-                                child: Image.file(
-                                  File(provider.recentPhotos.first.path),
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) {
-                                    return const Icon(
-                                      Icons.photo_library,
-                                      color: Colors.white,
-                                      size: 18, // 将尺寸从20缩小到18
-                                    );
-                                  },
-                                ),
-                              )
-                            : const Icon(
-                                Icons.photo_library,
-                                color: Colors.white,
-                                size: 18, // 将尺寸从20缩小到18
-                              ),
-                      ),
-                    );
-                  },
-                ),
-
-                // 中间拍摄按钮
-                _buildCaptureButton(),
-
-                // 为了保持布局平衡，添加一个空的占位容器，宽度与左侧按钮相同
+                // 左右两侧按钮的容器
                 Container(
-                  width: 38, // 将宽度从40缩小到38
-                  height: 38, // 将高度从40缩小到38
-                  margin: const EdgeInsets.only(left: 28), // 调整左边距从30改为28
+                  width: MediaQuery.of(context).size.width,
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 40.0), // 左右边距
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween, // 等距分布
+                      children: [
+                        // 左侧预览相册按钮
+                        Consumer<CameraProvider>(
+                          builder: (context, provider, child) {
+                            final hasRecentPhotos =
+                                provider.recentPhotos.isNotEmpty;
+
+                            return GestureDetector(
+                              onTap: widget.onGalleryPress,
+                              child: Container(
+                                width: 56,
+                                height: 56,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(12),
+                                  color: Colors.black.withOpacity(0.5),
+                                  border: Border.all(
+                                      color: Colors.white.withOpacity(0.5),
+                                      width: 1),
+                                ),
+                                child: hasRecentPhotos
+                                    ? ClipRRect(
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: Image.file(
+                                          File(
+                                              provider.recentPhotos.first.path),
+                                          fit: BoxFit.cover,
+                                          errorBuilder:
+                                              (context, error, stackTrace) {
+                                            return const Icon(
+                                              Icons.photo_library,
+                                              color: Colors.white,
+                                              size: 32,
+                                            );
+                                          },
+                                        ),
+                                      )
+                                    : const Icon(
+                                        Icons.photo_library,
+                                        color: Colors.white,
+                                        size: 32,
+                                      ),
+                              ),
+                            );
+                          },
+                        ),
+
+                        // 右侧教我拍按钮
+                        GestureDetector(
+                          onTap: widget.onTeachPress,
+                          child: Consumer<CameraProvider>(
+                            builder: (context, provider, child) {
+                              // 根据上传状态显示不同UI
+                              if (provider.uploadState ==
+                                  UploadState.uploading) {
+                                return Container(
+                                  width: 96,
+                                  height: 96,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: Colors.black.withOpacity(0.3),
+                                  ),
+                                  child: Center(
+                                    child: Stack(
+                                      alignment: Alignment.center,
+                                      children: [
+                                        CircularProgressIndicator(
+                                          value: provider.uploadProgress > 0
+                                              ? provider.uploadProgress
+                                              : null,
+                                          valueColor:
+                                              AlwaysStoppedAnimation<Color>(
+                                                  Colors.white),
+                                          strokeWidth: 3,
+                                        ),
+                                        const MagicIcon(),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              } else {
+                                return Container(
+                                  width: 96,
+                                  height: 96,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: Colors.transparent,
+                                  ),
+                                  child: const Center(
+                                    child: MagicIcon(),
+                                  ),
+                                );
+                              }
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -407,7 +465,7 @@ class CameraControlsState extends State<CameraControls> {
 
   Widget _buildCaptureButton() {
     return GestureDetector(
-      onTap: widget.showingTips ? widget.onCapturePress : widget.onTeachPress,
+      onTap: widget.onCapturePress,
       child: Container(
         width: 68,
         height: 68,

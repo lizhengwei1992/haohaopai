@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/image_analysis_service.dart';
 import '../models/photo_metadata.dart';
 import 'package:path/path.dart' as path;
+import 'dart:typed_data';
 
 enum CameraState {
   initial, // 初始状态
@@ -19,6 +20,13 @@ enum CameraState {
   error, // 错误状态
 }
 
+enum UploadState {
+  idle, // 空闲状态
+  uploading, // 上传中
+  success, // 上传成功
+  error, // 上传错误
+}
+
 class CameraProvider with ChangeNotifier {
   // 服务
   final _imageAnalysisService = ImageAnalysisService();
@@ -26,6 +34,14 @@ class CameraProvider with ChangeNotifier {
   // 状态
   CameraState _state = CameraState.initial;
   CameraState get state => _state;
+
+  // 上传状态
+  UploadState _uploadState = UploadState.idle;
+  UploadState get uploadState => _uploadState;
+
+  // 上传进度
+  double _uploadProgress = 0.0;
+  double get uploadProgress => _uploadProgress;
 
   // 拍摄建议
   final List<ShootingTip> _tips = [];
@@ -57,6 +73,18 @@ class CameraProvider with ChangeNotifier {
   // 构造函数
   CameraProvider() {
     _loadShootingCount();
+  }
+
+  // 设置上传状态
+  void setUploadState(UploadState state) {
+    _uploadState = state;
+    notifyListeners();
+  }
+
+  // 设置上传进度
+  void setUploadProgress(double progress) {
+    _uploadProgress = progress;
+    notifyListeners();
   }
 
   // 从SharedPreferences加载拍摄次数
@@ -99,7 +127,32 @@ class CameraProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  // 分析图像并获取拍摄建议
+  // 使用直接传递图像字节的方式分析图像
+  Future<void> analyzeImageBytes(Uint8List imageBytes) async {
+    try {
+      _setState(CameraState.analyzing);
+
+      final startTime = DateTime.now();
+      final tips = await _imageAnalysisService.analyzeImageBytes(imageBytes);
+      final endTime = DateTime.now();
+
+      _tips.clear();
+      _tips.addAll(tips);
+      _originalPhotoPath = null; // 不需要保存原始照片路径
+
+      // 增加拍摄次数
+      incrementShootingCount();
+
+      _setState(CameraState.showingTips);
+    } catch (e) {
+      debugPrint('分析图像错误: $e');
+      _errorMessage = '无法分析图像，请重试';
+      _setState(CameraState.error);
+      rethrow;
+    }
+  }
+
+  // 分析图像并获取拍摄建议（原始方法，保留向后兼容）
   Future<void> analyzeImage(String imagePath) async {
     try {
       _setState(CameraState.analyzing);

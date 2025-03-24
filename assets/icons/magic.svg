@@ -19,7 +19,7 @@
     <filter id="a" width="94" height="94" x="0" y="0" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
       <feFlood flood-opacity="0" result="BackgroundImageFix"/>
       <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-      <feGaussianBlur result="effect1_foregroundBlur_57_541" stdDeviation="10"/>
+      <feGaussianBlur result="effect1_foregroundBlur_52_150" stdDeviation="10"/>
     </filter>
     <filter id="c" width="57" height="57" x="20" y="20" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
       <feFlood flood-opacity="0" result="BackgroundImageFix"/>
@@ -29,7 +29,7 @@
       <feGaussianBlur stdDeviation="3"/>
       <feComposite in2="hardAlpha" k2="-1" k3="1" operator="arithmetic"/>
       <feColorMatrix values="0 0 0 0 0.470833 0 0 0 0 0.657598 0 0 0 0 1 0 0 0 1 0"/>
-      <feBlend in2="shape" result="effect1_innerShadow_57_541"/>
+      <feBlend in2="shape" result="effect1_innerShadow_52_150"/>
     </filter>
   </defs>
 </svg>

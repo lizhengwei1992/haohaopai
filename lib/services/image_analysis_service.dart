@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'dart:typed_data';
 
 class ShootingTip {
   final String type;
@@ -34,19 +35,29 @@ class ImageAnalysisService {
       "2. 禁止使用Markdown格式\n"
       "3. 语言精炼，每条意见最多30个字）";
 
-  Future<List<ShootingTip>> analyzeImage(String imagePath) async {
+  // 直接使用图像字节数据进行分析（无需保存文件）
+  Future<List<ShootingTip>> analyzeImageBytes(Uint8List imageBytes) async {
+    final startTime = DateTime.now();
+    debugPrint('📊 AI分析开始: ${startTime.toString()}');
+
     try {
-      final bytes = await File(imagePath).readAsBytes();
-      final base64Image = base64Encode(bytes);
+      // 直接使用字节数据转换为base64
+      final base64Image = base64Encode(imageBytes);
+      debugPrint(
+          '📊 图像转base64完成: ${DateTime.now().difference(startTime).inMilliseconds}ms');
 
       _dio.options.headers['Authorization'] =
           'Bearer sk-413e167d4c744d3f89d0bc0b7dcc3ea8';
       _dio.options.headers['Content-Type'] = 'application/json';
 
+      final requestStartTime = DateTime.now();
+      debugPrint(
+          '📊 API请求开始: ${requestStartTime.difference(startTime).inMilliseconds}ms');
+
       final response = await _dio.post(
         'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
         data: {
-          'model': 'qwen-vl-plus',
+          'model': 'qwen-vl-plus-latest',
           'response_format': {'type': 'json_object'},
           'messages': [
             {
@@ -63,14 +74,42 @@ class ImageAnalysisService {
         },
       );
 
+      debugPrint(
+          '📊 AI API响应时间: ${DateTime.now().difference(requestStartTime).inMilliseconds}ms');
+
       if (response.statusCode == 200 && response.data['choices'] != null) {
         final content = response.data['choices'][0]['message']['content'];
-        debugPrint('AI返回内容: $content');
+        debugPrint('📊 AI返回内容: $content');
+
         // 解析AI返回的JSON内容
         final tips = _parseAIResponse(content);
+
+        final totalTime = DateTime.now().difference(startTime).inMilliseconds;
+        debugPrint('📊 AI分析总耗时: ${totalTime}ms');
+
         return tips;
       }
       throw Exception('Failed to analyze image');
+    } catch (e) {
+      final totalTime = DateTime.now().difference(startTime).inMilliseconds;
+      debugPrint('📊 AI分析失败，总耗时: ${totalTime}ms');
+      debugPrint('分析出错: $e');
+
+      // 模拟数据保持不变
+      return [
+        ShootingTip(type: '构图', text: '建议将主体置于九宫格右下交点', priority: 1),
+        ShootingTip(type: '角度', text: '当前光线偏暗,建议调整角度避免逆光', priority: 2),
+        ShootingTip(type: '光线', text: '尝试降低拍摄角度,突出主体', priority: 3),
+        ShootingTip(type: '动作', text: '尝试自然微笑并略微侧身,增加照片活力', priority: 4),
+      ];
+    }
+  }
+
+  // 原始方法保留（使用文件路径）
+  Future<List<ShootingTip>> analyzeImage(String imagePath) async {
+    try {
+      final bytes = await File(imagePath).readAsBytes();
+      return analyzeImageBytes(bytes);
     } catch (e) {
       debugPrint(e.toString());
       // 模拟数据保持不变
