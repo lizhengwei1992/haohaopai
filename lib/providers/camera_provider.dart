@@ -136,6 +136,12 @@ class CameraProvider with ChangeNotifier {
       final tips = await _imageAnalysisService.analyzeImageBytes(imageBytes);
       final endTime = DateTime.now();
 
+      // 打印模型返回的拍摄建议（显示实际内容）
+      debugPrint('📸 模型返回拍摄建议:');
+      for (var tip in tips) {
+        debugPrint('📸 - ${tip.type}: ${tip.text}');
+      }
+
       _tips.clear();
       _tips.addAll(tips);
       _originalPhotoPath = null; // 不需要保存原始照片路径
@@ -149,30 +155,6 @@ class CameraProvider with ChangeNotifier {
       _errorMessage = '无法分析图像，请重试';
       _setState(CameraState.error);
       rethrow;
-    }
-  }
-
-  // 分析图像并获取拍摄建议（原始方法，保留向后兼容）
-  Future<void> analyzeImage(String imagePath) async {
-    try {
-      _setState(CameraState.analyzing);
-      _currentPhotoPath = imagePath;
-
-      // 调用AI分析服务
-      final tips = await _imageAnalysisService.analyzeImage(imagePath);
-
-      // 更新建议列表
-      _tips.clear();
-      _tips.addAll(tips);
-
-      // 增加拍摄次数
-      incrementShootingCount();
-
-      _setState(CameraState.showingTips);
-    } catch (e) {
-      debugPrint('分析图像出错: $e');
-      _errorMessage = '无法分析图像，请重试';
-      _setState(CameraState.error);
     }
   }
 

@@ -79,7 +79,7 @@ class ImageAnalysisService {
 
       if (response.statusCode == 200 && response.data['choices'] != null) {
         final content = response.data['choices'][0]['message']['content'];
-        debugPrint('📊 AI返回内容: $content');
+        debugPrint('📊 AI返回原始内容长度: ${content.length} 字符');
 
         // 解析AI返回的JSON内容
         final tips = _parseAIResponse(content);
@@ -105,23 +105,6 @@ class ImageAnalysisService {
     }
   }
 
-  // 原始方法保留（使用文件路径）
-  Future<List<ShootingTip>> analyzeImage(String imagePath) async {
-    try {
-      final bytes = await File(imagePath).readAsBytes();
-      return analyzeImageBytes(bytes);
-    } catch (e) {
-      debugPrint(e.toString());
-      // 模拟数据保持不变
-      return [
-        ShootingTip(type: '构图', text: '建议将主体置于九宫格右下交点', priority: 1),
-        ShootingTip(type: '角度', text: '当前光线偏暗,建议调整角度避免逆光', priority: 2),
-        ShootingTip(type: '光线', text: '尝试降低拍摄角度,突出主体', priority: 3),
-        ShootingTip(type: '动作', text: '尝试自然微笑并略微侧身,增加照片活力', priority: 4),
-      ];
-    }
-  }
-
   List<ShootingTip> _parseAIResponse(String content) {
     try {
       // 使用正则表达式提取符合格式的JSON内容
@@ -131,12 +114,12 @@ class ImageAnalysisService {
       final match = regex.firstMatch(content);
 
       if (match == null) {
-        debugPrint('未找到符合格式的JSON内容');
+        debugPrint('📊 未找到符合格式的JSON内容');
         return _getDefaultTips();
       }
 
       final jsonString = match.group(0);
-      debugPrint('提取的JSON内容: $jsonString');
+      debugPrint('📊 成功提取符合格式的JSON内容');
 
       final Map<String, dynamic> jsonContent = json.decode(jsonString!);
       final tips = <ShootingTip>[];
@@ -155,9 +138,10 @@ class ImageAnalysisService {
         }
       }
 
+      debugPrint('📊 成功解析${tips.length}条拍摄建议');
       return tips.isNotEmpty ? tips : _getDefaultTips();
     } catch (e) {
-      debugPrint('Error parsing AI response: ${e.toString()}');
+      debugPrint('📊 解析AI响应出错: ${e.toString()}');
       return _getDefaultTips();
     }
   }
