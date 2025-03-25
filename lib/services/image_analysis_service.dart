@@ -3,22 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'dart:typed_data';
-
-class ShootingTip {
-  final String type;
-  final String text;
-  final int priority;
-
-  ShootingTip({required this.type, required this.text, required this.priority});
-
-  factory ShootingTip.fromJson(Map<String, dynamic> json) {
-    return ShootingTip(
-      type: json['type'],
-      text: json['text'],
-      priority: json['priority'],
-    );
-  }
-}
+import 'package:http/http.dart' as http;
+import '../models/shooting_tip.dart';
 
 class ImageAnalysisService {
   final _dio = Dio();
@@ -33,7 +19,7 @@ class ImageAnalysisService {
       "要求：\n"
       "1. 每个值必须用中文双引号包裹\n"
       "2. 禁止使用Markdown格式\n"
-      "3. 语言精炼，每条意见最多30个字）";
+      "3. 语言精炼，每条意见最多50个字）";
 
   // 直接使用图像字节数据进行分析（无需保存文件）
   Future<List<ShootingTip>> analyzeImageBytes(Uint8List imageBytes) async {
@@ -57,7 +43,7 @@ class ImageAnalysisService {
       final response = await _dio.post(
         'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
         data: {
-          'model': 'qwen-vl-plus-latest',
+          'model': 'qwen-vl-plus',
           'response_format': {'type': 'json_object'},
           'messages': [
             {

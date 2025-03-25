@@ -1,36 +1,195 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/camera_provider.dart';
-import '../../services/image_analysis_service.dart';
-import 'dart:math';
+import '../../models/shooting_tip.dart';
 
-class ShootingTips extends StatelessWidget {
-  const ShootingTips({super.key});
+class ShootingTips extends StatefulWidget {
+  const ShootingTips({Key? key}) : super(key: key);
+
+  @override
+  State<ShootingTips> createState() => _ShootingTipsState();
+}
+
+class _ShootingTipsState extends State<ShootingTips>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _slideAnimation;
+  late Animation<double> _fadeAnimation;
+
+  // 记录每个卡片的展开状态
+  final Map<String, bool> _expandedStates = {
+    '构图': false,
+    '光线': false,
+    '角度': false,
+    '动作': false,
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 800),
+      vsync: this,
+    );
+
+    _slideAnimation = Tween<double>(
+      begin: 100.0,
+      end: 0.0,
+    ).animate(CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutCubic,
+    ));
+
+    _fadeAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOut,
+    ));
+
+    _controller.forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  // 获取每种类型对应的渐变色
+  List<Color> _getGradientColors(String type) {
+    switch (type) {
+      case '构图':
+        return [
+          const Color(0xFFE8F1FF),
+          const Color(0xFFF3F7FF),
+        ];
+      case '光线':
+        return [
+          const Color(0xFFFFEEEE),
+          const Color(0xFFFFF6F6),
+        ];
+      case '角度':
+        return [
+          const Color(0xFFFFF6E9),
+          const Color(0xFFFFFBF6),
+        ];
+      case '动作':
+        return [
+          const Color(0xFFFFEEF6),
+          const Color(0xFFFFF6FA),
+        ];
+      default:
+        return [Colors.white, Colors.white];
+    }
+  }
+
+  // 获取每种类型对应的英文标题
+  String _getEnglishTitle(String type) {
+    switch (type) {
+      case '构图':
+        return 'Composition';
+      case '光线':
+        return 'Lighting';
+      case '角度':
+        return 'Angle';
+      case '动作':
+        return 'Action';
+      default:
+        return '';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<CameraProvider>(
-      builder: (context, provider, child) {
-        final tips = provider.tips;
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return Transform.translate(
+          offset: Offset(0, _slideAnimation.value),
+          child: Opacity(
+            opacity: _fadeAnimation.value,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Column(
+                children: [
+                  // 顶部标题和进度条
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 20),
+                    child: Column(
+                      children: [
+                        const Text(
+                          'Teach me to take',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          width: 120,
+                          height: 2,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.3),
+                            borderRadius: BorderRadius.circular(1),
+                          ),
+                          child: Consumer<CameraProvider>(
+                            builder: (context, provider, child) {
+                              return FractionallySizedBox(
+                                alignment: Alignment.centerLeft,
+                                widthFactor: provider.uploadProgress,
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(1),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
 
-        if (tips.isEmpty) {
-          return const SizedBox.shrink();
-        }
-
-        // 使用Stack布局，让气泡可以浮动在屏幕上
-        final screenSize = MediaQuery.of(context).size;
-        return SizedBox(
-          width: screenSize.width,
-          height: screenSize.height,
-          child: Stack(
-            children: [
-              for (int i = 0; i < tips.length; i++)
-                _FloatingTipBubble(
-                  tip: tips[i],
-                  index: i,
-                  totalTips: tips.length,
-                ),
-            ],
+                  // 拍摄建议卡片列表
+                  Consumer<CameraProvider>(
+                    builder: (context, provider, child) {
+                      final tips = provider.tips;
+                      return Column(
+                        children: [
+                          for (final type in ['构图', '光线', '角度', '动作'])
+                            TipCard(
+                              type: type,
+                              englishTitle: _getEnglishTitle(type),
+                              content: tips
+                                  .firstWhere(
+                                    (tip) => tip.type == type,
+                                    orElse: () => ShootingTip(
+                                      type: type,
+                                      text: '',
+                                      priority: 0,
+                                    ),
+                                  )
+                                  .text,
+                              gradientColors: _getGradientColors(type),
+                              isExpanded: _expandedStates[type] ?? false,
+                              onToggle: () {
+                                setState(() {
+                                  _expandedStates[type] =
+                                      !(_expandedStates[type] ?? false);
+                                });
+                              },
+                            ),
+                        ],
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
           ),
         );
       },
@@ -38,248 +197,97 @@ class ShootingTips extends StatelessWidget {
   }
 }
 
-class _FloatingTipBubble extends StatefulWidget {
-  final ShootingTip tip;
-  final int index;
-  final int totalTips;
+class TipCard extends StatelessWidget {
+  final String type;
+  final String englishTitle;
+  final String content;
+  final List<Color> gradientColors;
+  final bool isExpanded;
+  final VoidCallback onToggle;
 
-  const _FloatingTipBubble({
-    required this.tip,
-    required this.index,
-    required this.totalTips,
-  });
-
-  @override
-  State<_FloatingTipBubble> createState() => _FloatingTipBubbleState();
-}
-
-class _FloatingTipBubbleState extends State<_FloatingTipBubble>
-    with TickerProviderStateMixin {
-  late final AnimationController _controller;
-  late final AnimationController _expandController;
-  late final Animation<Offset> _floatAnimation;
-  late final Animation<double> _expandAnimation;
-  late final Animation<double> _scaleAnimation;
-  bool _isExpanded = false;
-  Offset? _originalPosition;
-
-  @override
-  void initState() {
-    super.initState();
-
-    // 初始化浮动动画控制器
-    _controller = AnimationController(
-      duration: const Duration(milliseconds: 3000),
-      vsync: this,
-    );
-
-    // 初始化展开动画控制器
-    _expandController = AnimationController(
-      duration: const Duration(milliseconds: 200),
-      vsync: this,
-    );
-
-    // 配置浮动动画
-    final random = Random(widget.index);
-    final startX = random.nextDouble() * 0.1 - 0.05;
-    final startY = random.nextDouble() * 0.1 - 0.05;
-    final endX = random.nextDouble() * 0.1 - 0.05;
-    final endY = random.nextDouble() * 0.1 - 0.05;
-
-    _floatAnimation = Tween<Offset>(
-      begin: Offset(startX, startY),
-      end: Offset(endX, endY),
-    ).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: Curves.easeInOutQuad,
-      ),
-    );
-
-    // 配置展开动画
-    _expandAnimation = Tween<double>(begin: 1.0, end: 1.8).animate(
-      CurvedAnimation(
-        parent: _expandController,
-        curve: Curves.easeInOutQuad,
-      ),
-    );
-
-    // 配置缩放动画
-    _scaleAnimation = Tween<double>(begin: 1.0, end: 1.3).animate(
-      CurvedAnimation(
-        parent: _expandController,
-        curve: Curves.easeInOutQuad,
-      ),
-    );
-
-    _controller.forward();
-    _controller.addStatusListener((status) {
-      if (status == AnimationStatus.completed) {
-        _controller.reverse();
-      } else if (status == AnimationStatus.dismissed) {
-        _controller.forward();
-      }
-    });
-  }
-
-  void _toggleExpand() {
-    setState(() {
-      _isExpanded = !_isExpanded;
-      if (_isExpanded) {
-        _expandController.forward();
-      } else {
-        _expandController.reverse();
-      }
-    });
-  }
+  const TipCard({
+    Key? key,
+    required this.type,
+    required this.englishTitle,
+    required this.content,
+    required this.gradientColors,
+    required this.isExpanded,
+    required this.onToggle,
+  }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    final screenSize = MediaQuery.of(context).size;
-    final bubbleSize = 140.0;
-
-    // 计算气泡位置
-    final positions = [
-      Offset(screenSize.width * 0.2, screenSize.height * 0.2),
-      Offset(screenSize.width * 0.7, screenSize.height * 0.15),
-      Offset(screenSize.width * 0.1, screenSize.height * 0.5),
-      Offset(screenSize.width * 0.65, screenSize.height * 0.45),
-    ];
-    final position = positions[widget.index % positions.length];
-    _originalPosition ??= position;
-
-    // 气泡颜色
-    final colors = [
-      const Color(0xAAFF6F61),
-      const Color(0xAA6B5B95),
-      const Color(0xAA88B04B),
-      const Color(0xAAF7CAC9),
-    ];
-    final color = colors[widget.index % colors.length];
-
-    return SizedBox(
-      width: screenSize.width,
-      height: screenSize.height,
-      child: Stack(
-        children: [
-          if (_isExpanded)
-            GestureDetector(
-              onTap: _toggleExpand,
-              behavior: HitTestBehavior.opaque,
-              child: Container(
-                width: screenSize.width,
-                height: screenSize.height,
-                color: Colors.transparent,
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onToggle,
+          borderRadius: BorderRadius.circular(16),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: gradientColors,
               ),
+              borderRadius: BorderRadius.circular(16),
             ),
-          Positioned(
-            left: _isExpanded
-                ? screenSize.width / 2 - bubbleSize * 0.9
-                : _originalPosition!.dx,
-            top: _isExpanded
-                ? screenSize.height / 2 - bubbleSize * 0.9
-                : _originalPosition!.dy,
-            child: GestureDetector(
-              onTap: _toggleExpand,
-              child: AnimatedBuilder(
-                animation: Listenable.merge([_expandController, _controller]),
-                builder: (context, child) {
-                  return Transform.scale(
-                    scale: _scaleAnimation.value,
-                    child: SlideTransition(
-                      position: _isExpanded
-                          ? AlwaysStoppedAnimation(Offset.zero)
-                          : _floatAnimation,
-                      child: Container(
-                        width: bubbleSize * _expandAnimation.value,
-                        height: bubbleSize * _expandAnimation.value,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        englishTitle,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF333333),
+                        ),
+                      ),
+                      Container(
+                        width: 24,
+                        height: 24,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: color,
-                          gradient: RadialGradient(
-                            colors: [
-                              color.withOpacity(0.9),
-                              color.withOpacity(0.6),
-                            ],
-                            stops: const [0.5, 1.0],
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: color.withOpacity(0.3),
-                              blurRadius: 10,
-                              spreadRadius: 2,
-                            ),
-                          ],
+                          color: Colors.black.withOpacity(0.1),
                         ),
                         child: Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(12.0),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Flexible(
-                                  child: Icon(
-                                    _getIconForType(widget.tip.type),
-                                    color: Colors.white,
-                                    size: 24 * (_isExpanded ? 1.2 : 1.0),
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Flexible(
-                                  flex: 2,
-                                  child: SingleChildScrollView(
-                                    padding: EdgeInsets.zero,
-                                    child: Text(
-                                      widget.tip.text,
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize:
-                                            12 * (_isExpanded ? 1.2 : 1.0),
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                      maxLines: _isExpanded ? 6 : 3,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                          child: AnimatedRotation(
+                            duration: const Duration(milliseconds: 300),
+                            turns: isExpanded ? 0.125 : 0,
+                            child: const Icon(
+                              Icons.add,
+                              size: 18,
+                              color: Color(0xFF666666),
                             ),
                           ),
                         ),
                       ),
+                    ],
+                  ),
+                  if (isExpanded) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      content,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: Color(0xFF666666),
+                        height: 1.5,
+                      ),
                     ),
-                  );
-                },
+                  ],
+                ],
               ),
             ),
           ),
-        ],
+        ),
       ),
     );
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    _expandController.dispose();
-    super.dispose();
-  }
-
-  IconData _getIconForType(String type) {
-    switch (type) {
-      case '构图':
-        return Icons.grid_on;
-      case '光线':
-        return Icons.wb_sunny;
-      case '角度':
-        return Icons.rotate_right;
-      case '焦点':
-        return Icons.center_focus_strong;
-      case '动作':
-        return Icons.directions_run;
-      default:
-        return Icons.photo_camera;
-    }
   }
 }

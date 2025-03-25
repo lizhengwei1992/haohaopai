@@ -21,6 +21,7 @@ import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:image/image.dart' as img;
 import '../models/photo_metadata.dart';
 import 'dart:math' as Math;
+import '../widgets/camera/shooting_tips_animation.dart';
 
 class CameraScreen extends StatefulWidget {
   const CameraScreen({super.key});
@@ -60,6 +61,8 @@ class _CameraScreenState extends State<CameraScreen>
   int _ultraWideCameraIndex = -1; // 超广角摄像头索引
   int _frontCameraIndex = -1; // 前置摄像头索引
   bool _isUltraWideMode = false; // 是否是超广角模式
+
+  Uint8List? _lastPreviewFrame;
 
   @override
   void initState() {
@@ -616,19 +619,57 @@ class _CameraScreenState extends State<CameraScreen>
                                   _setZoomLevel(newZoom);
                                 }
                               },
-                              child: FilteredCameraPreview(
-                                filterType: _currentFilter,
-                                child: OverflowBox(
-                                  alignment: Alignment.center,
-                                  child: FittedBox(
-                                    fit: BoxFit.cover,
-                                    child: SizedBox(
+                              child: Consumer<CameraProvider>(
+                                builder: (context, provider, child) {
+                                  // 如果预览被暂停，显示最后一帧
+                                  if (provider.isPreviewPaused) {
+                                    return Container(
                                       width: screenWidth,
                                       height: screenWidth * originalAspectRatio,
-                                      child: CameraPreview(_controller!),
+                                      color: Colors.black,
+                                      child: Stack(
+                                        fit: StackFit.expand,
+                                        children: [
+                                          // 使用静态图片显示最后一帧
+                                          Image.memory(
+                                            _lastPreviewFrame ?? Uint8List(0),
+                                            fit: BoxFit.cover,
+                                            width: screenWidth,
+                                            height: screenWidth *
+                                                originalAspectRatio,
+                                          ),
+                                          // 应用滤镜效果
+                                          if (_currentFilter != FilterType.none)
+                                            ColorFiltered(
+                                              colorFilter:
+                                                  CameraFilters.getColorFilter(
+                                                      _currentFilter),
+                                              child: Container(
+                                                color: Colors.transparent,
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    );
+                                  }
+
+                                  // 正常预览
+                                  return FilteredCameraPreview(
+                                    filterType: _currentFilter,
+                                    child: OverflowBox(
+                                      alignment: Alignment.center,
+                                      child: FittedBox(
+                                        fit: BoxFit.cover,
+                                        child: SizedBox(
+                                          width: screenWidth,
+                                          height:
+                                              screenWidth * originalAspectRatio,
+                                          child: CameraPreview(_controller!),
+                                        ),
+                                      ),
                                     ),
-                                  ),
-                                ),
+                                  );
+                                },
                               ),
                             ),
                           ),
@@ -651,13 +692,14 @@ class _CameraScreenState extends State<CameraScreen>
                   ),
                 ),
 
-                // 拍摄建议
-                if (showingTips)
-                  Positioned(
-                    bottom: 170, // 调整位置，从160改为170以适应新布局
-                    left: 0,
-                    right: 0,
-                    child: const ShootingTips(),
+                // 拍摄建议和分析动画
+                if (showingTips || analyzing)
+                  Positioned.fill(
+                    child: ShootingTipsAnimation(
+                      tips: cameraProvider.tips,
+                      isAnalyzing: analyzing,
+                      uploadProgress: cameraProvider.uploadProgress,
+                    ),
                   ),
 
                 // 顶部空间 - 放在Stack中，使其可以与预览框重叠，移除底色
@@ -751,27 +793,6 @@ class _CameraScreenState extends State<CameraScreen>
                     showFilterSelector: _showFilterSelector, // 传递滤镜选择器状态
                   ),
                 ),
-
-                // 加载指示器
-                if (analyzing)
-                  Container(
-                    color: Colors.black54,
-                    width: double.infinity,
-                    height: double.infinity,
-                    child: const Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          CircularProgressIndicator(color: Colors.white),
-                          SizedBox(height: 16),
-                          Text(
-                            '正在分析...',
-                            style: TextStyle(color: Colors.white, fontSize: 16),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
               ],
             ),
           ),
@@ -1025,6 +1046,21 @@ class _CameraScreenState extends State<CameraScreen>
     }
   }
 
+  // 保存最后一帧预览图像
+  Future<void> _saveLastPreviewFrame() async {
+    if (_controller == null || !_controller!.value.isInitialized) return;
+
+    try {
+      final XFile image = await _controller!.takePicture();
+      final bytes = await image.readAsBytes();
+      setState(() {
+        _lastPreviewFrame = bytes;
+      });
+    } catch (e) {
+      debugPrint('保存最后一帧预览图像失败: $e');
+    }
+  }
+
   // 处理"教我拍"按钮点击
   Future<void> _handleTeachPress(BuildContext context) async {
     if (_controller == null || !_controller!.value.isInitialized) {
@@ -1043,6 +1079,9 @@ class _CameraScreenState extends State<CameraScreen>
     try {
       // 设置状态为分析中
       cameraProvider.setUploadState(UploadState.uploading);
+
+      // 保存最后一帧预览图像
+      await _saveLastPreviewFrame();
 
       // 使用直接获取低分辨率图像的方式
       debugPrint('📸 开始获取低分辨率图像...');

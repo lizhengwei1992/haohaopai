@@ -36,6 +36,8 @@ dependencies:
   image: ^4.5.3
   photo_manager: ^3.6.4
   flutter_svg: ^2.0.9
+  loading_animation_widget: ^1.2.0
+  flutter_animate: ^4.3.0
 
 dev_dependencies:
   flutter_test:

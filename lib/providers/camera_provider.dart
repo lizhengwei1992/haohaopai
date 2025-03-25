@@ -8,6 +8,7 @@ import 'package:photo_manager/photo_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/image_analysis_service.dart';
 import '../models/photo_metadata.dart';
+import '../models/shooting_tip.dart';
 import 'package:path/path.dart' as path;
 import 'dart:typed_data';
 
@@ -42,6 +43,10 @@ class CameraProvider with ChangeNotifier {
   // 上传进度
   double _uploadProgress = 0.0;
   double get uploadProgress => _uploadProgress;
+
+  // 相机预览状态
+  bool _isPreviewPaused = false;
+  bool get isPreviewPaused => _isPreviewPaused;
 
   // 拍摄建议
   final List<ShootingTip> _tips = [];
@@ -127,10 +132,23 @@ class CameraProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  // 暂停相机预览
+  void pausePreview() {
+    _isPreviewPaused = true;
+    notifyListeners();
+  }
+
+  // 恢复相机预览
+  void resumePreview() {
+    _isPreviewPaused = false;
+    notifyListeners();
+  }
+
   // 使用直接传递图像字节的方式分析图像
   Future<void> analyzeImageBytes(Uint8List imageBytes) async {
     try {
       _setState(CameraState.analyzing);
+      pausePreview(); // 暂停预览
 
       final startTime = DateTime.now();
       final tips = await _imageAnalysisService.analyzeImageBytes(imageBytes);
@@ -150,10 +168,12 @@ class CameraProvider with ChangeNotifier {
       incrementShootingCount();
 
       _setState(CameraState.showingTips);
+      resumePreview(); // 恢复预览
     } catch (e) {
       debugPrint('分析图像错误: $e');
       _errorMessage = '无法分析图像，请重试';
       _setState(CameraState.error);
+      resumePreview(); // 发生错误时也要恢复预览
       rethrow;
     }
   }
@@ -437,6 +457,7 @@ class CameraProvider with ChangeNotifier {
     _currentPhotoPath = null;
     _originalPhotoPath = null;
     _errorMessage = '';
+    resumePreview(); // 确保预览被恢复
     notifyListeners();
   }
 
