@@ -75,6 +75,10 @@ class CameraProvider with ChangeNotifier {
   // 应用相册目录名称
   static const String appAlbumName = 'HaoHaoPai';
 
+  // 教我拍进行中标志
+  bool _isTeachingInProgress = false;
+  bool get isTeachingInProgress => _isTeachingInProgress;
+
   // 构造函数
   CameraProvider() {
     _loadShootingCount();
@@ -83,6 +87,27 @@ class CameraProvider with ChangeNotifier {
   // 设置上传状态
   void setUploadState(UploadState state) {
     _uploadState = state;
+
+    // 重要：当状态变为uploading时，立即设置教我拍进行中标志为true
+    if (state == UploadState.uploading) {
+      _isTeachingInProgress = true;
+      debugPrint('教我拍流程标志已设置为进行中');
+    }
+    // 当状态变为success或error时，设置教我拍进行中标志为false
+    else if (state == UploadState.success || state == UploadState.error) {
+      _isTeachingInProgress = false;
+      debugPrint('教我拍流程标志已设置为结束');
+    }
+
+    notifyListeners();
+  }
+
+  // 重置上传状态 - 确保每次点击"教我拍"时都能重新开始
+  void resetUploadState() {
+    _uploadState = UploadState.idle;
+    _uploadProgress = 0.0;
+    _setState(CameraState.initial); // 重置相机状态
+    _isTeachingInProgress = false; // 重置教我拍进行中标志
     notifyListeners();
   }
 
@@ -147,8 +172,16 @@ class CameraProvider with ChangeNotifier {
   // 使用直接传递图像字节的方式分析图像
   Future<void> analyzeImageBytes(Uint8List imageBytes) async {
     try {
+      // 先清除上一次的tips
+      _tips.clear();
+
+      // 设置状态为分析中
       _setState(CameraState.analyzing);
       pausePreview(); // 暂停预览
+
+      // 设置教我拍进行中标志
+      _isTeachingInProgress = true;
+      notifyListeners();
 
       final startTime = DateTime.now();
       final tips = await _imageAnalysisService.analyzeImageBytes(imageBytes);
@@ -160,20 +193,29 @@ class CameraProvider with ChangeNotifier {
         debugPrint('📸 - ${tip.type}: ${tip.text}');
       }
 
-      _tips.clear();
+      // 添加新的tips
       _tips.addAll(tips);
       _originalPhotoPath = null; // 不需要保存原始照片路径
 
       // 增加拍摄次数
       incrementShootingCount();
 
+      // 设置状态为显示拍摄建议
       _setState(CameraState.showingTips);
       resumePreview(); // 恢复预览
+
+      // 教我拍流程仍然在进行中，直到用户主动终止或开始新流程
+      // isTeachingInProgress保持为true
     } catch (e) {
       debugPrint('分析图像错误: $e');
       _errorMessage = '无法分析图像，请重试';
       _setState(CameraState.error);
       resumePreview(); // 发生错误时也要恢复预览
+
+      // 发生错误时重置教我拍进行中标志
+      _isTeachingInProgress = false;
+      notifyListeners();
+
       rethrow;
     }
   }
@@ -457,8 +499,25 @@ class CameraProvider with ChangeNotifier {
     _currentPhotoPath = null;
     _originalPhotoPath = null;
     _errorMessage = '';
+    _isTeachingInProgress = false; // 确保重置教我拍进行中标志
     resumePreview(); // 确保预览被恢复
     notifyListeners();
+  }
+
+  // 结束教我拍流程 - 重置状态
+  void finishTeaching() {
+    // 仅当正在进行教我拍流程时才执行
+    if (_isTeachingInProgress) {
+      _isTeachingInProgress = false;
+      _uploadState = UploadState.idle;
+      _uploadProgress = 0.0;
+
+      // 保留tips内容，但将状态切换回初始状态
+      _setState(CameraState.initial);
+
+      notifyListeners();
+      debugPrint('教我拍流程已结束');
+    }
   }
 
   // 清除错误

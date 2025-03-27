@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter_animate/flutter_animate.dart';
 import '../../models/shooting_tip.dart';
 import 'dart:ui';
+import 'package:provider/provider.dart';
+import '../../providers/camera_provider.dart';
 
 class ShootingTipsAnimation extends StatefulWidget {
   final List<ShootingTip> tips;
@@ -22,56 +24,149 @@ class ShootingTipsAnimation extends StatefulWidget {
 
 class _ShootingTipsAnimationState extends State<ShootingTipsAnimation>
     with TickerProviderStateMixin {
+  // 动画控制器
   late AnimationController _rotationController;
   late AnimationController _tipsRevealController;
-  late List<Animation<double>> _tipsOpacityAnimations;
 
-  // 定义tips的渲染顺序：顺时针方向，按照对角线顺序
-  final List<Map<String, dynamic>> _tipsConfig = const [
-    {'type': '构图', 'quadrant': '左上', 'angle': 135 * math.pi / 180}, // 左上角
-    {'type': '光线', 'quadrant': '右上', 'angle': 45 * math.pi / 180}, // 右上角
-    {'type': '动作', 'quadrant': '右下', 'angle': -45 * math.pi / 180}, // 右下角
-    {'type': '角度', 'quadrant': '左下', 'angle': -135 * math.pi / 180}, // 左下角
-  ];
+  // 记录上一次的分析状态，用于检测状态变化
+  bool _lastIsAnalyzing = false;
 
+  // 记录上一次的tips内容，用于检测内容变化
+  List<ShootingTip> _lastTips = [];
+
+  // 追踪渲染阶段
   bool _hasTips = false;
+  bool _tipsCirclesRendered = false;
+
+  // tips配置
+  final List<Map<String, dynamic>> _tipsConfig = const [
+    {'type': '构图', 'quadrant': '左上', 'angle': 135 * math.pi / 180},
+    {'type': '光线', 'quadrant': '右上', 'angle': 45 * math.pi / 180},
+    {'type': '动作', 'quadrant': '右下', 'angle': -45 * math.pi / 180},
+    {'type': '角度', 'quadrant': '左下', 'angle': -135 * math.pi / 180},
+  ];
 
   @override
   void initState() {
     super.initState();
 
-    // 主旋转动画控制器 - 设置为4秒一圈
+    // 初始化旋转动画控制器
     _rotationController = AnimationController(
-      duration: const Duration(seconds: 4),
-      vsync: this,
-    )..repeat();
-
-    // Tips圈显示控制器 - 设置为4秒完成所有显示
-    _tipsRevealController = AnimationController(
       duration: const Duration(seconds: 4),
       vsync: this,
     );
 
-    // 为每个tip创建不同时间点的显示动画，确保它们在一个旋转周期内依次出现
-    _tipsOpacityAnimations = List.generate(_tipsConfig.length, (index) {
-      // 计算每个tip出现的时间点 - 均匀分布在旋转周期内
-      final startPercent = index / _tipsConfig.length;
-      final endPercent = startPercent + 0.15; // 淡入效果的持续时间
+    // 初始化tips显示动画控制器
+    _tipsRevealController = AnimationController(
+      duration: const Duration(seconds: 4),
+      vsync: this,
+    )..addStatusListener((status) {
+        if (status == AnimationStatus.completed) {
+          setState(() {
+            _tipsCirclesRendered = true;
+          });
+        }
+      });
 
-      return Tween<double>(begin: 0.0, end: 1.0).animate(
-        CurvedAnimation(
-          parent: _tipsRevealController,
-          curve: Interval(
-            startPercent,
-            endPercent,
-            curve: Curves.easeOutBack,
-          ),
-        ),
-      );
+    // 检查初始状态
+    _checkAndUpdateState();
+  }
+
+  @override
+  void didUpdateWidget(ShootingTipsAnimation oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _checkAndUpdateState();
+  }
+
+  // 核心方法：检查状态变化并更新动画
+  void _checkAndUpdateState() {
+    // 检测"教我拍"按钮点击状态变化
+    if (widget.isAnalyzing != _lastIsAnalyzing) {
+      if (widget.isAnalyzing) {
+        // 开始新的分析 - 重置所有状态
+        _startNewAnalysis();
+      } else {
+        // 分析结束
+        _endAnalysis();
+      }
+      _lastIsAnalyzing = widget.isAnalyzing;
+    }
+
+    // 即使uploadState没有变化，但如果isAnalyzing为true，也确保动画正常运行
+    if (widget.isAnalyzing && !_rotationController.isAnimating) {
+      _rotationController.repeat();
+
+      // 如果tips显示动画未完成，确保它继续运行
+      if (!_tipsRevealController.isCompleted &&
+          !_tipsRevealController.isAnimating) {
+        _tipsRevealController.forward();
+      }
+    }
+
+    // 检测tips内容变化
+    bool tipsChanged = false;
+    if (widget.tips.length != _lastTips.length) {
+      tipsChanged = true;
+    } else {
+      for (int i = 0; i < widget.tips.length; i++) {
+        if (widget.tips[i].text != _lastTips[i].text) {
+          tipsChanged = true;
+          break;
+        }
+      }
+    }
+
+    // 如果tips内容有变化且非空
+    if (tipsChanged &&
+        widget.tips.isNotEmpty &&
+        widget.tips.any((tip) => tip.text.isNotEmpty)) {
+      setState(() {
+        _hasTips = true;
+        _lastTips = List.from(widget.tips);
+      });
+
+      // 停止旋转动画
+      _rotationController.stop();
+
+      // 确保所有tips圈显示完成
+      if (!_tipsRevealController.isCompleted) {
+        _tipsRevealController.animateTo(1.0,
+            duration: const Duration(milliseconds: 300));
+      }
+    }
+  }
+
+  // 开始新的分析流程
+  void _startNewAnalysis() {
+    // 完全重置所有状态
+    setState(() {
+      _hasTips = false;
+      _tipsCirclesRendered = false;
+      _lastTips = [];
     });
 
-    // 开始显示tips圈的动画
-    _tipsRevealController.forward();
+    // 停止并重置所有动画，确保从头开始
+    _rotationController.stop();
+    _rotationController.reset();
+
+    _tipsRevealController.stop();
+    _tipsRevealController.reset();
+
+    // 使用短延迟确保状态已重置后再启动动画
+    Future.microtask(() {
+      if (mounted) {
+        _rotationController.repeat(); // 开始旋转
+        _tipsRevealController.forward(); // 开始显示tips圈
+      }
+    });
+  }
+
+  // 结束分析流程
+  void _endAnalysis() {
+    // 如果没有收到tips内容，则停止旋转
+    if (!_hasTips) {
+      _rotationController.stop();
+    }
   }
 
   @override
@@ -79,37 +174,6 @@ class _ShootingTipsAnimationState extends State<ShootingTipsAnimation>
     _rotationController.dispose();
     _tipsRevealController.dispose();
     super.dispose();
-  }
-
-  @override
-  void didUpdateWidget(ShootingTipsAnimation oldWidget) {
-    super.didUpdateWidget(oldWidget);
-
-    // 检查是否收到了tips内容
-    if (widget.tips.isNotEmpty &&
-        widget.tips.any((tip) => tip.text.isNotEmpty)) {
-      _hasTips = true;
-      // 当收到tips结果后，立即停止旋转动画
-      _rotationController.stop();
-      // 确保所有tips圈都显示出来
-      if (!_tipsRevealController.isCompleted) {
-        _tipsRevealController.animateTo(1.0,
-            duration: const Duration(milliseconds: 300));
-      }
-    }
-
-    // 当开始新的分析时，重新启动动画
-    if (widget.isAnalyzing && !oldWidget.isAnalyzing) {
-      _hasTips = false;
-      _rotationController.repeat();
-      _tipsRevealController.reset();
-      _tipsRevealController.forward();
-    }
-
-    // 当分析结束但没有新tips时，也要停止旋转
-    if (!widget.isAnalyzing && oldWidget.isAnalyzing) {
-      _rotationController.stop();
-    }
   }
 
   Color _getColorForType(String type) {
@@ -294,7 +358,7 @@ class _ShootingTipsAnimationState extends State<ShootingTipsAnimation>
   Widget _buildTipsWithRotation(double screenCenterX) {
     // 固定中心点坐标
     final containerCenterX = screenCenterX;
-    final containerCenterY = 200.0; // 调整中心点Y坐标
+    final containerCenterY = 200.0;
 
     return Stack(
       alignment: Alignment.center,
@@ -309,10 +373,10 @@ class _ShootingTipsAnimationState extends State<ShootingTipsAnimation>
         );
 
         // 计算tip圈在中心圆环四个象限的位置
-        final circleSize = 140.0; // tips圈的直径
-        const centerRadius = 170.0; // 从中心到tips圈中心的距离
+        final circleSize = 140.0;
+        const centerRadius = 170.0;
 
-        // 使用固定位置，确保tips在正确的象限位置
+        // 固定位置
         double x, y;
         switch (config['quadrant']) {
           case '左上':
@@ -332,39 +396,35 @@ class _ShootingTipsAnimationState extends State<ShootingTipsAnimation>
             y = containerCenterY + centerRadius / math.sqrt(2);
             break;
           default:
-            // 默认使用角度计算（不应该走到这里）
             x = containerCenterX + centerRadius * math.cos(angle);
             y = containerCenterY + centerRadius * math.sin(angle);
         }
 
-        // 根据动画进度计算透明度
-        final rotationProgress = _rotationController.value;
-        final appearThreshold = index / _tipsConfig.length;
-
-        // 计算每个tip的显示时机
+        // 计算透明度 - 简化为三种状态
         double opacity = 0.0;
 
         if (_hasTips) {
-          // 如果有内容，全部显示
-          opacity = _tipsOpacityAnimations[index].value;
-        } else {
-          // 旋转过程中依次显示
-          // 根据当前旋转进度决定哪些tips显示
+          // 1. 已收到tips内容 - 完全显示
+          opacity = 1.0;
+        } else if (!_tipsCirclesRendered) {
+          // 2. 首次渲染中 - 根据旋转进度依次显示
+          final rotationProgress = _rotationController.value;
+          final appearThreshold = index / _tipsConfig.length;
+
           if (rotationProgress >= appearThreshold) {
-            // 过了显示阈值，计算淡入效果
             final segmentSize = 1.0 / _tipsConfig.length;
             final localProgress =
                 (rotationProgress - appearThreshold) / segmentSize;
-            opacity = math.min(1.0, localProgress * 3.0); // 快速淡入
+            opacity = math.min(1.0, localProgress * 3.0);
           }
+        } else {
+          // 3. 渲染完成但无内容 - 保持显示
+          opacity = 1.0;
         }
 
-        // 确保opacity值在合法范围内
         final clampedOpacity = opacity.clamp(0.0, 1.0);
 
-        // 调整Positioned的位置，使其正确定位
         return Positioned(
-          // circleSize/2 确保圈圈居中显示
           left: x - circleSize / 2,
           top: y - circleSize / 2,
           child: Opacity(
@@ -374,7 +434,7 @@ class _ShootingTipsAnimationState extends State<ShootingTipsAnimation>
               content: _hasTips ? tip.text : '',
               color: _getColorForType(tipType),
               index: index,
-              pulsate: !_hasTips,
+              pulsate: !_hasTips && _tipsCirclesRendered,
             ),
           ),
         );

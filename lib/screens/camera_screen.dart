@@ -22,6 +22,7 @@ import 'package:image/image.dart' as img;
 import '../models/photo_metadata.dart';
 import 'dart:math' as Math;
 import '../widgets/camera/shooting_tips_animation.dart';
+import 'dart:async';
 
 class CameraScreen extends StatefulWidget {
   const CameraScreen({super.key});
@@ -62,7 +63,11 @@ class _CameraScreenState extends State<CameraScreen>
   int _frontCameraIndex = -1; // 前置摄像头索引
   bool _isUltraWideMode = false; // 是否是超广角模式
 
+  // 相机预览的最后一帧图像
   Uint8List? _lastPreviewFrame;
+
+  // 图像流控制器
+  StreamSubscription<CameraImage>? _imageStreamSubscription;
 
   @override
   void initState() {
@@ -76,36 +81,65 @@ class _CameraScreenState extends State<CameraScreen>
           Provider.of<CameraProvider>(context, listen: false);
       cameraProvider.loadAppPhotos();
     });
+
+    _initializeCamera();
   }
 
   @override
   void dispose() {
+    // 确保在dispose时安全地停止图像流
+    _stopImageStream();
+
+    // 安全地释放相机控制器
+    if (_controller != null) {
+      final oldController = _controller;
+      _controller = null;
+
+      oldController?.dispose().catchError((e) {
+        debugPrint('释放相机控制器错误: $e');
+      });
+    }
+
     WidgetsBinding.instance.removeObserver(this);
-    _controller?.dispose();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // 如果相机控制器为空，直接返回
-    if (_controller == null) {
-      return;
-    }
+    debugPrint('应用生命周期状态变化: $state');
 
     // 当应用进入非活动状态时，释放相机资源
-    if (state == AppLifecycleState.inactive) {
-      // 释放相机资源
-      if (_controller!.value.isInitialized) {
-        _controller!.dispose();
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused) {
+      // 安全释放相机资源
+      if (_controller != null) {
+        debugPrint('生命周期变化：释放相机资源');
+        _stopImageStream();
+
+        final oldController = _controller;
+        _controller = null; // 先置空，避免其他代码访问到正在释放的控制器
+
+        // 使用异步方式释放，不阻塞UI
+        oldController?.dispose().then((_) {
+          debugPrint('相机资源释放完成');
+        }).catchError((error) {
+          debugPrint('释放相机资源时出错: $error');
+        });
+
+        setState(() {
+          _isInitialized = false;
+        });
       }
-      _isInitialized = false;
     } else if (state == AppLifecycleState.resumed) {
       // 当应用恢复活动状态时，重新初始化相机
-      if (!_isInitialized ||
-          _controller == null ||
-          !_controller!.value.isInitialized) {
-        _initializeCamera();
-      }
+      debugPrint('应用恢复活动状态，重新初始化相机');
+
+      // 使用微任务确保在UI更新后再初始化相机
+      Future.microtask(() {
+        if (mounted) {
+          _initializeCamera();
+        }
+      });
     }
   }
 
@@ -164,54 +198,84 @@ class _CameraScreenState extends State<CameraScreen>
     }
   }
 
-  Future<void> _initializeCamera() async {
+  // 获取可用相机
+  Future<void> _fetchCameras() async {
     try {
-      if (_cameras.isEmpty) {
+      _cameras = await availableCameras();
+      debugPrint('找到${_cameras.length}个相机');
+
+      if (_cameras.isNotEmpty) {
+        // 查找前置相机索引
+        _frontCameraIndex = _cameras.indexWhere(
+            (camera) => camera.lensDirection == CameraLensDirection.front);
+
+        // 查找后置标准相机索引
+        _standardCameraIndex = _cameras.indexWhere((camera) =>
+            camera.lensDirection == CameraLensDirection.back &&
+            !camera.name.toLowerCase().contains('ultra') &&
+            !camera.name.toLowerCase().contains('telephoto'));
+
+        // 查找后置超广角相机索引（如果有）
+        _ultraWideCameraIndex = _cameras.indexWhere((camera) =>
+            camera.lensDirection == CameraLensDirection.back &&
+            (camera.name.toLowerCase().contains('ultra') ||
+                camera.name.toLowerCase().contains('wide')));
+      }
+    } catch (e) {
+      debugPrint('获取相机列表错误: $e');
+    }
+  }
+
+  // 初始化相机
+  Future<void> _initializeCamera() async {
+    // 如果有现存的相机控制器，先安全释放
+    if (_controller != null) {
+      try {
+        _stopImageStream();
+
+        final oldController = _controller;
+        _controller = null; // 先置空，避免其他代码访问到正在释放的控制器
+
+        await oldController?.dispose();
+      } catch (e) {
+        debugPrint('释放旧相机控制器错误: $e');
+      }
+    }
+
+    if (_cameras.isEmpty) {
+      await _fetchCameras();
+    }
+
+    if (_cameras.isEmpty) {
+      debugPrint('没有找到可用的相机');
+      return;
+    }
+
+    try {
+      int cameraIndex;
+
+      // 选择后置标准相机（如果有）
+      if (_standardCameraIndex >= 0) {
+        cameraIndex = _standardCameraIndex;
+      } else if (_cameras.isNotEmpty) {
+        // 如果没有找到后置标准相机，选择第一个相机
+        cameraIndex = 0;
+      } else {
+        // 如果没有相机，直接返回
         return;
       }
 
-      final CameraController cameraController = CameraController(
-        _cameras[_standardCameraIndex],
-        ResolutionPreset.max,
-        enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.yuv420,
-      );
+      // 通过专门的方法切换到指定相机
+      await _switchToCamera(cameraIndex);
 
-      _controller = cameraController;
-      _currentCameraIndex = _standardCameraIndex;
-
-      await cameraController.initialize();
-
-      // 设置初始对焦模式为连续自动对焦
-      try {
-        await cameraController.setFocusMode(FocusMode.auto);
-      } catch (e) {
-        debugPrint('设置初始对焦模式错误: $e');
-      }
-
-      // 获取相机支持的缩放范围
-      try {
-        _minZoomLevel = await cameraController.getMinZoomLevel();
-        _maxZoomLevel = await cameraController.getMaxZoomLevel();
-
-        // 确保最小缩放级别为1.0
-        if (_minZoomLevel < 1.0) {
-          _minZoomLevel = 1.0;
-        }
-      } catch (e) {
-        // 如果获取失败，使用默认值
-        _minZoomLevel = 1.0;
-        _maxZoomLevel = 5.0;
-        debugPrint('获取缩放级别错误: $e');
-      }
-
-      if (mounted) {
-        setState(() {
-          _isInitialized = true;
-        });
-      }
+      debugPrint('相机初始化完成');
     } catch (e) {
-      debugPrint('相机初始化错误: $e');
+      debugPrint('初始化相机错误: $e');
+
+      // 确保UI状态反映初始化失败
+      setState(() {
+        _isInitialized = false;
+      });
     }
   }
 
@@ -289,24 +353,45 @@ class _CameraScreenState extends State<CameraScreen>
 
     debugPrint('切换到摄像头索引: $cameraIndex, 名称: ${_cameras[cameraIndex].name}');
 
-    // 释放现有控制器资源
-    await _controller?.dispose();
-
-    // 创建新的相机控制器
-    final CameraController cameraController = CameraController(
-      _cameras[cameraIndex],
-      ResolutionPreset.max,
-      enableAudio: false,
-      imageFormatGroup: ImageFormatGroup.yuv420,
-    );
-
-    // 更新控制器引用
-    _controller = cameraController;
-    _currentCameraIndex = cameraIndex;
-
     try {
-      // 初始化新相机
+      // 停止图像流
+      _stopImageStream();
+
+      // 安全释放现有控制器资源
+      CameraController? oldController = _controller;
+      // 先将_controller设为null，避免其他地方访问到正在dispose的控制器
+      _controller = null;
+
+      // 异步释放旧控制器，避免阻塞UI
+      if (oldController != null) {
+        try {
+          await oldController.dispose();
+        } catch (e) {
+          debugPrint('释放旧相机控制器错误: $e');
+          // 错误处理但继续执行
+        }
+      }
+
+      // 创建新的相机控制器
+      final CameraController cameraController = CameraController(
+        _cameras[cameraIndex],
+        ResolutionPreset.max,
+        enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.yuv420,
+      );
+
+      // 先初始化新控制器，成功后再更新引用
       await cameraController.initialize();
+
+      // 确保组件仍然挂载
+      if (!mounted) {
+        await cameraController.dispose();
+        return;
+      }
+
+      // 更新控制器引用和索引
+      _controller = cameraController;
+      _currentCameraIndex = cameraIndex;
 
       // 获取新相机的缩放范围
       _minZoomLevel = await cameraController.getMinZoomLevel();
@@ -317,15 +402,21 @@ class _CameraScreenState extends State<CameraScreen>
         _minZoomLevel = 1.0;
       }
 
-      if (mounted) {
-        setState(() {
-          _isInitialized = true;
-          _currentZoomLevel = 1.0;
-          _isFlashOn = false; // 重置闪光灯状态
-        });
-      }
+      // 初始化完成后再更新UI状态
+      setState(() {
+        _isInitialized = true;
+        _currentZoomLevel = 1.0;
+        _isFlashOn = false; // 重置闪光灯状态
+      });
+
+      // 最后再启动图像流
+      _startImageStream();
     } catch (e) {
       debugPrint('切换相机错误: $e');
+      // 出错时确保状态一致
+      setState(() {
+        _isInitialized = false;
+      });
     }
   }
 
@@ -459,6 +550,27 @@ class _CameraScreenState extends State<CameraScreen>
       );
     }
 
+    // 安全获取相机宽高比，避免空指针异常
+    final double cameraAspectRatio;
+    try {
+      cameraAspectRatio = _controller!.value.aspectRatio;
+    } catch (e) {
+      debugPrint('获取相机宽高比出错: $e');
+      // 发生错误时尝试重新初始化相机
+      if (mounted) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _initializeCamera();
+        });
+      }
+      // 显示加载界面
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(
+          child: CircularProgressIndicator(color: Colors.white),
+        ),
+      );
+    }
+
     final cameraProvider = Provider.of<CameraProvider>(context);
     final settingsProvider = Provider.of<SettingsProvider>(context);
     final showingTips = cameraProvider.state == CameraState.showingTips;
@@ -471,9 +583,6 @@ class _CameraScreenState extends State<CameraScreen>
     final topPadding = mediaQuery.padding.top;
     final screenWidth = mediaQuery.size.width;
     final screenHeight = mediaQuery.size.height;
-
-    // 相机控制器的原始宽高比（通常是4:3）
-    final originalAspectRatio = _controller!.value.aspectRatio;
 
     // 目标宽高比（用户选择的拍摄比例）
     double targetAspectRatio;
@@ -517,7 +626,7 @@ class _CameraScreenState extends State<CameraScreen>
     }
 
     // 打印当前预览区域的比例和尺寸，用于调试
-    debugPrint('原始相机比例: $originalAspectRatio, 目标比例: $targetAspectRatio');
+    debugPrint('原始相机比例: $cameraAspectRatio, 目标比例: $targetAspectRatio');
     debugPrint(
         '预览区域尺寸: $screenWidth x $previewHeight, 顶部位置: $previewTopPosition');
     debugPrint('屏幕尺寸: $screenWidth x $screenHeight, 顶部安全区域: $topPadding');
@@ -625,7 +734,7 @@ class _CameraScreenState extends State<CameraScreen>
                                   if (provider.isPreviewPaused) {
                                     return Container(
                                       width: screenWidth,
-                                      height: screenWidth * originalAspectRatio,
+                                      height: screenWidth * cameraAspectRatio,
                                       color: Colors.black,
                                       child: Stack(
                                         fit: StackFit.expand,
@@ -635,8 +744,8 @@ class _CameraScreenState extends State<CameraScreen>
                                             _lastPreviewFrame ?? Uint8List(0),
                                             fit: BoxFit.cover,
                                             width: screenWidth,
-                                            height: screenWidth *
-                                                originalAspectRatio,
+                                            height:
+                                                screenWidth * cameraAspectRatio,
                                           ),
                                           // 应用滤镜效果
                                           if (_currentFilter != FilterType.none)
@@ -663,7 +772,7 @@ class _CameraScreenState extends State<CameraScreen>
                                         child: SizedBox(
                                           width: screenWidth,
                                           height:
-                                              screenWidth * originalAspectRatio,
+                                              screenWidth * cameraAspectRatio,
                                           child: CameraPreview(_controller!),
                                         ),
                                       ),
@@ -817,7 +926,7 @@ class _CameraScreenState extends State<CameraScreen>
                               child: SizedBox(
                                 width: MediaQuery.of(context).size.width,
                                 height: MediaQuery.of(context).size.width *
-                                    _controller!.value.aspectRatio,
+                                    cameraAspectRatio,
                                 child: CameraPreview(_controller!),
                               ),
                             ),
@@ -1046,18 +1155,70 @@ class _CameraScreenState extends State<CameraScreen>
     }
   }
 
-  // 保存最后一帧预览图像
-  Future<void> _saveLastPreviewFrame() async {
-    if (_controller == null || !_controller!.value.isInitialized) return;
+  // 启动图像流
+  void _startImageStream() {
+    if (_controller == null || !_controller!.value.isInitialized) {
+      debugPrint('相机未初始化，无法启动图像流');
+      return;
+    }
 
     try {
-      final XFile image = await _controller!.takePicture();
-      final bytes = await image.readAsBytes();
-      setState(() {
-        _lastPreviewFrame = bytes;
+      // 如果已经在运行，先停止
+      _stopImageStream();
+
+      // 启动图像流
+      _controller!.startImageStream((CameraImage image) {
+        // 这里我们只需要保存最新的一帧，不需要处理每一帧
+        // 在实际应用中，这里可以根据需要进行处理
       });
+      debugPrint('图像流已启动');
     } catch (e) {
-      debugPrint('保存最后一帧预览图像失败: $e');
+      debugPrint('启动图像流出错: $e');
+    }
+  }
+
+  // 停止图像流
+  void _stopImageStream() {
+    try {
+      // 先取消订阅
+      _imageStreamSubscription?.cancel();
+      _imageStreamSubscription = null;
+
+      // 安全地停止图像流
+      if (_controller != null &&
+          _controller!.value.isInitialized &&
+          _controller!.value.isStreamingImages) {
+        _controller!.stopImageStream();
+        debugPrint('图像流已安全停止');
+      }
+    } catch (e) {
+      debugPrint('停止图像流出错: $e');
+      // 即使出错也确保清理资源
+      _imageStreamSubscription = null;
+    }
+  }
+
+  // 从当前预览中获取图像
+  Future<Uint8List?> _getImageFromStream() async {
+    if (_controller == null || !_controller!.value.isInitialized) {
+      debugPrint('相机未初始化，无法获取图像');
+      return null;
+    }
+
+    try {
+      // 确保在获取图像前相机处于稳定状态
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      // 直接拍照获取高质量图像，这比从流中提取单帧更可靠
+      final XFile photo = await _controller!.takePicture();
+      if (!mounted) return null; // 确保组件仍然挂载
+
+      final bytes = await photo.readAsBytes();
+      debugPrint('成功从相机获取图像: ${bytes.length / 1024}KB');
+      return bytes;
+    } catch (e) {
+      debugPrint('从预览获取图像失败: $e');
+      return null;
     }
   }
 
@@ -1068,6 +1229,22 @@ class _CameraScreenState extends State<CameraScreen>
     }
 
     final cameraProvider = Provider.of<CameraProvider>(context, listen: false);
+
+    // 检查是否已经在教我拍流程中，如果是则不执行
+    if (cameraProvider.isTeachingInProgress) {
+      debugPrint('📸 教我拍流程正在进行中，忽略重复点击');
+      return;
+    }
+
+    // 先重置状态，确保每次点击都会触发完整的流程
+    cameraProvider.resetUploadState();
+
+    // 在此处立即设置上传状态为进行中，确保按钮立即变为灰色
+    cameraProvider.setUploadState(UploadState.uploading);
+
+    // 使用微任务确保UI立即更新
+    await Future.microtask(() {});
+
     final startTime = DateTime.now(); // 记录开始时间
     debugPrint('📸 教我拍流程开始: ${startTime.toString()}');
 
@@ -1077,24 +1254,23 @@ class _CameraScreenState extends State<CameraScreen>
         '📸 相机画面的实际分辨率: ${cameraResolution?.width} x ${cameraResolution?.height}');
 
     try {
-      // 设置状态为分析中
-      cameraProvider.setUploadState(UploadState.uploading);
-
-      // 保存最后一帧预览图像
-      await _saveLastPreviewFrame();
-
       // 使用直接获取低分辨率图像的方式
-      debugPrint('📸 开始获取低分辨率图像...');
+      debugPrint('📸 开始获取图像...');
       final lowResStartTime = DateTime.now();
 
-      // 尝试直接从相机获取预览图像并调整大小
-      final XFile photo = await _controller!.takePicture();
-      debugPrint(
-          '📸 拍照完成: ${DateTime.now().difference(lowResStartTime).inMilliseconds}ms');
+      // 直接从当前预览获取一帧图像，避免多次拍照
+      final bytes = await _getImageFromStream();
+      if (bytes == null) {
+        throw Exception('无法获取相机图像');
+      }
 
-      final bytes = await photo.readAsBytes();
+      // 保存最后一帧预览，用于显示
+      setState(() {
+        _lastPreviewFrame = bytes;
+      });
+
       debugPrint(
-          '📸 图像读取到内存: ${DateTime.now().difference(lowResStartTime).inMilliseconds}ms');
+          '📸 图像获取到内存: ${DateTime.now().difference(lowResStartTime).inMilliseconds}ms');
 
       // 直接调整图像大小至较低分辨率
       final resizedBytes = await _resizeImageFast(bytes, targetWidth: 640);
@@ -1122,6 +1298,14 @@ class _CameraScreenState extends State<CameraScreen>
       // 计算整个流程的总耗时
       final totalTime = DateTime.now().difference(startTime).inMilliseconds;
       debugPrint('📸 教我拍流程完成，总耗时: ${totalTime}ms');
+
+      // 设置一个延时，在显示tips一段时间后自动结束流程
+      Future.delayed(const Duration(seconds: 12), () {
+        if (mounted && cameraProvider.isTeachingInProgress) {
+          debugPrint('📸 教我拍流程自动结束');
+          cameraProvider.finishTeaching();
+        }
+      });
     } catch (e) {
       debugPrint('📸 教我拍照错误: $e');
       cameraProvider.setUploadState(UploadState.error);
@@ -1189,25 +1373,35 @@ class _CameraScreenState extends State<CameraScreen>
 
   // 显示全屏图像
   void _showFullScreenImage(BuildContext context, String imagePath) {
-    // 在导航前释放相机资源
-    if (_controller != null && _controller!.value.isInitialized) {
-      _controller!.dispose();
-      _isInitialized = false;
-    }
+    try {
+      // 在导航前安全释放相机资源
+      if (_controller != null && _controller!.value.isInitialized) {
+        _stopImageStream();
 
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => FullScreenImage(imagePath: imagePath),
-      ),
-    ).then((_) {
-      // 返回时重新初始化相机
-      if (!_isInitialized ||
-          _controller == null ||
-          !_controller!.value.isInitialized) {
-        _initializeCamera();
+        final oldController = _controller;
+        _controller = null;
+
+        oldController?.dispose().catchError((e) {
+          debugPrint('释放相机资源错误: $e');
+        });
+
+        _isInitialized = false;
       }
-    });
+
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => FullScreenImage(imagePath: imagePath),
+        ),
+      ).then((_) {
+        // 返回时重新初始化相机
+        if (mounted) {
+          _initializeCamera();
+        }
+      });
+    } catch (e) {
+      debugPrint('显示全屏图像错误: $e');
+    }
   }
 
   // 处理拍摄比例变化

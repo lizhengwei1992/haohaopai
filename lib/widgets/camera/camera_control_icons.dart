@@ -210,12 +210,20 @@ class PersonIcon extends StatelessWidget {
 
 /// 魔法（教我拍）图标
 class MagicIcon extends StatelessWidget {
-  const MagicIcon({Key? key}) : super(key: key);
+  final Color? color;
+  final bool isGray;
+
+  const MagicIcon({Key? key, this.color, this.isGray = false})
+      : super(key: key);
 
   @override
   Widget build(BuildContext context) {
+    // 根据isGray参数决定加载哪个SVG
+    final String svgPath =
+        isGray ? 'assets/icons/magic_gray.svg' : 'assets/icons/magic.svg';
+
     return SvgPicture.asset(
-      'assets/icons/magic.svg',
+      svgPath,
       width: 96,
       height: 96,
     );

@@ -200,40 +200,24 @@ class CameraControlsState extends State<CameraControls> {
                         ),
 
                         // 右侧教我拍按钮
-                        GestureDetector(
-                          onTap: widget.onTeachPress,
-                          child: Consumer<CameraProvider>(
-                            builder: (context, provider, child) {
-                              // 根据上传状态显示不同UI
-                              if (provider.uploadState ==
-                                  UploadState.uploading) {
-                                return Container(
-                                  width: 96,
-                                  height: 96,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: Colors.black.withOpacity(0.3),
-                                  ),
-                                  child: Center(
-                                    child: Stack(
-                                      alignment: Alignment.center,
-                                      children: [
-                                        CircularProgressIndicator(
-                                          value: provider.uploadProgress > 0
-                                              ? provider.uploadProgress
-                                              : null,
-                                          valueColor:
-                                              AlwaysStoppedAnimation<Color>(
-                                                  Colors.white),
-                                          strokeWidth: 3,
-                                        ),
-                                        const MagicIcon(),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                              } else {
-                                return Container(
+                        Consumer<CameraProvider>(
+                          builder: (context, provider, child) {
+                            // 记录教我拍状态，用于调试
+                            final bool isInProgress =
+                                provider.isTeachingInProgress;
+                            final uploadState = provider.uploadState;
+                            debugPrint(
+                                '教我拍按钮状态：进行中=${isInProgress}, 上传状态=${uploadState}');
+
+                            // 通过使用不同的组件而不仅是函数检查来禁用点击
+                            if (!isInProgress) {
+                              // 正常状态下可点击
+                              return GestureDetector(
+                                onTap: () {
+                                  debugPrint('点击教我拍按钮 - 正常状态');
+                                  widget.onTeachPress();
+                                },
+                                child: Container(
                                   width: 96,
                                   height: 96,
                                   decoration: BoxDecoration(
@@ -241,12 +225,58 @@ class CameraControlsState extends State<CameraControls> {
                                     color: Colors.transparent,
                                   ),
                                   child: const Center(
-                                    child: MagicIcon(),
+                                    child: MagicIcon(isGray: false),
                                   ),
-                                );
-                              }
-                            },
-                          ),
+                                ),
+                              );
+                            } else if (uploadState == UploadState.uploading) {
+                              // 上传中状态 - 显示进度圈
+                              return Container(
+                                width: 96,
+                                height: 96,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: Colors.black.withOpacity(0.3),
+                                ),
+                                child: Center(
+                                  child: Stack(
+                                    alignment: Alignment.center,
+                                    children: [
+                                      CircularProgressIndicator(
+                                        value: provider.uploadProgress > 0
+                                            ? provider.uploadProgress
+                                            : null,
+                                        valueColor:
+                                            AlwaysStoppedAnimation<Color>(
+                                                Colors.white),
+                                        strokeWidth: 3,
+                                      ),
+                                      // 使用灰色图标
+                                      const MagicIcon(isGray: true),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            } else {
+                              // 教我拍流程中但不是上传状态时（如显示tips时）显示为灰色
+                              return Container(
+                                width: 96,
+                                height: 96,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: Colors.grey.withOpacity(0.7),
+                                  border: Border.all(
+                                    color: Colors.grey,
+                                    width: 2,
+                                  ),
+                                ),
+                                child: const Center(
+                                  // 使用灰色图标，不再需要ColorFiltered
+                                  child: MagicIcon(isGray: true),
+                                ),
+                              );
+                            }
+                          },
                         ),
                       ],
                     ),
