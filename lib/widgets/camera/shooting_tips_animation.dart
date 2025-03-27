@@ -38,6 +38,17 @@ class _ShootingTipsAnimationState extends State<ShootingTipsAnimation>
   bool _hasTips = false;
   bool _tipsCirclesRendered = false;
 
+  // 添加放大的tip相关状态
+  String? _selectedTipType;
+  bool _isTipExpanded = false;
+  late AnimationController _expandController;
+  late Animation<double> _expandAnimation;
+
+  // 添加控制tips显示的状态
+  bool _areTipsVisible = true;
+  late AnimationController _tipsVisibilityController;
+  late Animation<double> _tipsVisibilityAnimation;
+
   // tips配置
   final List<Map<String, dynamic>> _tipsConfig = const [
     {'type': '构图', 'quadrant': '左上', 'angle': 135 * math.pi / 180},
@@ -67,6 +78,28 @@ class _ShootingTipsAnimationState extends State<ShootingTipsAnimation>
           });
         }
       });
+
+    // 初始化放大动画控制器
+    _expandController = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+
+    _expandAnimation = CurvedAnimation(
+      parent: _expandController,
+      curve: Curves.easeOutCubic,
+    );
+
+    // 初始化tips显示/隐藏动画控制器
+    _tipsVisibilityController = AnimationController(
+      duration: const Duration(milliseconds: 500),
+      vsync: this,
+    );
+
+    _tipsVisibilityAnimation = CurvedAnimation(
+      parent: _tipsVisibilityController,
+      curve: Curves.easeInOut,
+    );
 
     // 检查初始状态
     _checkAndUpdateState();
@@ -173,6 +206,8 @@ class _ShootingTipsAnimationState extends State<ShootingTipsAnimation>
   void dispose() {
     _rotationController.dispose();
     _tipsRevealController.dispose();
+    _expandController.dispose();
+    _tipsVisibilityController.dispose();
     super.dispose();
   }
 
@@ -188,6 +223,41 @@ class _ShootingTipsAnimationState extends State<ShootingTipsAnimation>
         return const Color(0xFF4FD5A5); // 绿色
       default:
         return Colors.white;
+    }
+  }
+
+  // 处理Tip被点击
+  void _handleTipSelected(String tipType) {
+    setState(() {
+      _selectedTipType = tipType;
+      _isTipExpanded = true;
+    });
+    _expandController.forward();
+  }
+
+  // 重置Tip扩展状态
+  void _resetExpandedTip() {
+    _expandController.reverse().then((_) {
+      setState(() {
+        _selectedTipType = null;
+        _isTipExpanded = false;
+      });
+    });
+  }
+
+  // 处理中心区域点击，收起/显示tips
+  void _toggleTipsVisibility() {
+    debugPrint('执行_toggleTipsVisibility方法');
+    setState(() {
+      _areTipsVisible = !_areTipsVisible;
+    });
+
+    if (_areTipsVisible) {
+      debugPrint('显示tips，反向动画');
+      _tipsVisibilityController.reverse();
+    } else {
+      debugPrint('隐藏tips，正向动画');
+      _tipsVisibilityController.forward();
     }
   }
 
@@ -212,147 +282,283 @@ class _ShootingTipsAnimationState extends State<ShootingTipsAnimation>
           ),
         ),
 
-        // 中心圆圈和动画效果 - 整体向上移动30px
-        Positioned(
-          left: 0,
-          right: 0,
-          top: MediaQuery.of(context).size.height / 2 - 200 - 30, // 增加偏移距离
-          child: SizedBox(
-            height: 400, // 增加高度，确保所有tips圈都能完全显示
-            width: MediaQuery.of(context).size.width,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                // 外圈白色圆环
-                Container(
-                  width: 300,
-                  height: 300,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: Colors.white.withOpacity(0.15),
-                      width: 1.5,
-                    ),
-                  ),
-                ),
-
-                // 第二圈白色圆环
-                Container(
-                  width: 220,
-                  height: 220,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: Colors.white.withOpacity(0.1),
-                      width: 1,
-                    ),
-                  ),
-                ),
-
-                // 星星点缀层 - 添加动画效果
-                AnimatedBuilder(
-                  animation: _rotationController,
-                  builder: (context, child) {
-                    return CustomPaint(
-                      size: const Size(280, 280),
-                      painter: StarfieldPainter(
-                        animationValue: _rotationController.value * math.pi * 2,
-                      ),
-                    );
-                  },
-                ),
-
-                // 动态虚线圆环 - 旋转效果
-                AnimatedBuilder(
-                  animation: _rotationController,
-                  builder: (context, child) {
-                    return Transform.rotate(
-                      angle: _rotationController.value * 2 * math.pi,
-                      child: SizedBox(
-                        width: 270,
-                        height: 270,
-                        child: CustomPaint(
-                          painter: DashedCirclePainter(),
+        // 如果有选中的tip，显示放大版本
+        if (_isTipExpanded && _selectedTipType != null)
+          FadeTransition(
+            opacity: _expandAnimation,
+            child: Center(
+              child: GestureDetector(
+                onTap: _resetExpandedTip,
+                child: _buildExpandedTip(),
+              ),
+            ),
+          )
+        else
+          // 中心圆圈和动画效果 - 整体向上移动30px
+          Positioned(
+            left: 0,
+            right: 0,
+            top: MediaQuery.of(context).size.height / 2 - 200 - 30, // 增加偏移距离
+            child: SizedBox(
+              height: 400, // 增加高度，确保所有tips圈都能完全显示
+              width: MediaQuery.of(context).size.width,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  // 外圈白色圆环 - 在收起状态不显示
+                  if (_areTipsVisible || !_hasTips)
+                    Container(
+                      width: 300,
+                      height: 300,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.white.withOpacity(0.15),
+                          width: 1.5,
                         ),
                       ),
-                    );
-                  },
-                ),
+                    ),
 
-                // 动态内圈彩色圆环 - 反向旋转
-                AnimatedBuilder(
-                  animation: _rotationController,
-                  builder: (context, child) {
-                    return Transform.rotate(
-                      angle: -_rotationController.value * 2 * math.pi,
-                      child: SizedBox(
-                        width: 120,
-                        height: 120,
-                        child: CustomPaint(
-                          painter: ColoredCirclePainter(),
+                  // 第二圈白色圆环 - 在收起状态不显示
+                  if (_areTipsVisible || !_hasTips)
+                    Container(
+                      width: 220,
+                      height: 220,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.white.withOpacity(0.1),
+                          width: 1,
                         ),
                       ),
-                    );
-                  },
-                ),
-
-                // 中心圆点(白色)
-                Container(
-                  width: 50,
-                  height: 50,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: RadialGradient(
-                      colors: [
-                        Colors.white,
-                        Colors.white.withOpacity(0.8),
-                      ],
-                      stops: const [0.3, 1.0],
                     ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.white.withOpacity(0.5),
-                        blurRadius: 10,
-                        spreadRadius: 2,
+
+                  // 星星点缀层 - 在收起状态不显示
+                  if (_areTipsVisible || !_hasTips)
+                    AnimatedBuilder(
+                      animation: _rotationController,
+                      builder: (context, child) {
+                        return CustomPaint(
+                          size: const Size(280, 280),
+                          painter: StarfieldPainter(
+                            animationValue:
+                                _rotationController.value * math.pi * 2,
+                          ),
+                        );
+                      },
+                    ),
+
+                  // 动态虚线圆环 - 旋转效果 - 在收起状态不显示
+                  if (_areTipsVisible || !_hasTips)
+                    AnimatedBuilder(
+                      animation: _rotationController,
+                      builder: (context, child) {
+                        return Transform.rotate(
+                          angle: _rotationController.value * 2 * math.pi,
+                          child: SizedBox(
+                            width: 270,
+                            height: 270,
+                            child: CustomPaint(
+                              painter: DashedCirclePainter(),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+
+                  // 动态内圈彩色圆环 - 反向旋转 - 始终显示
+                  AnimatedBuilder(
+                    animation: _rotationController,
+                    builder: (context, child) {
+                      return Transform.rotate(
+                        angle: -_rotationController.value * 2 * math.pi,
+                        child: SizedBox(
+                          width: 120,
+                          height: 120,
+                          child: CustomPaint(
+                            painter: ColoredCirclePainter(),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+
+                  // 中心圆点(白色) - 始终显示，添加点击功能
+                  GestureDetector(
+                    onTap: _hasTips
+                        ? () {
+                            debugPrint('中心点被点击，_hasTips=$_hasTips');
+                            _toggleTipsVisibility();
+                          }
+                        : null,
+                    child: Container(
+                      width: 50,
+                      height: 50,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: RadialGradient(
+                          colors: [
+                            Colors.white,
+                            Colors.white.withOpacity(0.8),
+                          ],
+                          stops: const [0.3, 1.0],
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.white.withOpacity(0.5),
+                            blurRadius: 10,
+                            spreadRadius: 2,
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                ),
-
-                // 中心小圆点
-                Container(
-                  width: 20,
-                  height: 20,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.black,
-                    border: Border.all(
-                      color: Colors.white.withOpacity(0.8),
-                      width: 2,
                     ),
                   ),
-                ),
 
-                // 白色射线和点
-                CustomPaint(
-                  size: const Size(300, 300),
-                  painter: RaysAndPointsPainter(),
-                ),
+                  // 中心小圆点 - 始终显示
+                  // 注意：这个组件会遮挡中心点的点击区域，需要改进
+                  // 将小圆点包含在点击区域内
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: Center(
+                      child: GestureDetector(
+                        onTap: _hasTips
+                            ? () {
+                                debugPrint('中心整体区域被点击，_hasTips=$_hasTips');
+                                _toggleTipsVisibility();
+                              }
+                            : null,
+                        child: Container(
+                          width: 70, // 增大点击区域
+                          height: 70, // 增大点击区域
+                          color: Colors.transparent, // 透明背景
+                          child: Center(
+                            child: Container(
+                              width: 20,
+                              height: 20,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.black,
+                                border: Border.all(
+                                  color: Colors.white.withOpacity(0.8),
+                                  width: 2,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
 
-                // 旋转的Tips圈 - 这部分最重要，与旋转控制器联动
-                AnimatedBuilder(
-                  animation: _rotationController,
-                  builder: (context, child) {
-                    final screenCenterX = MediaQuery.of(context).size.width / 2;
-                    return _buildTipsWithRotation(screenCenterX);
-                  },
-                ),
-              ],
+                  // 旋转的Tips圈 - 显示/隐藏受控制
+                  if (_areTipsVisible || !_hasTips)
+                    AnimatedBuilder(
+                      animation: _rotationController,
+                      builder: (context, child) {
+                        final screenCenterX =
+                            MediaQuery.of(context).size.width / 2;
+                        return _buildTipsWithRotation(screenCenterX);
+                      },
+                    ),
+                ],
+              ),
             ),
           ),
-        ),
       ],
     );
+  }
+
+  // 构建放大的Tip
+  Widget _buildExpandedTip() {
+    if (_selectedTipType == null) return const SizedBox();
+
+    final tip = widget.tips.firstWhere(
+      (tip) => tip.type == _selectedTipType,
+      orElse: () => ShootingTip(type: _selectedTipType!, text: '', priority: 0),
+    );
+
+    final color = _getColorForType(_selectedTipType!);
+
+    return Container(
+      width: 300,
+      height: 300,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: const Color(0xFF13131A),
+        border: Border.all(
+          color: color.withOpacity(0.8),
+          width: 3,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: color.withOpacity(0.5),
+            blurRadius: 20,
+            spreadRadius: 5,
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(30),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              _selectedTipType!,
+              style: TextStyle(
+                fontSize: 28,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+                letterSpacing: 1,
+                shadows: [
+                  Shadow(
+                    color: color.withOpacity(0.7),
+                    blurRadius: 10,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              _getEnglishTitle(_selectedTipType!),
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+                color: Colors.white.withOpacity(0.8),
+              ),
+            ),
+            const SizedBox(height: 25),
+            Text(
+              tip.text,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 18,
+                color: Colors.white,
+                height: 1.4,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 获取每种类型对应的英文标题
+  String _getEnglishTitle(String type) {
+    switch (type) {
+      case '构图':
+        return 'Composition';
+      case '光线':
+        return 'Lighting';
+      case '角度':
+        return 'Angle';
+      case '动作':
+        return 'Action';
+      default:
+        return '';
+    }
   }
 
   Widget _buildTipsWithRotation(double screenCenterX) {
@@ -424,19 +630,51 @@ class _ShootingTipsAnimationState extends State<ShootingTipsAnimation>
 
         final clampedOpacity = opacity.clamp(0.0, 1.0);
 
-        return Positioned(
-          left: x - circleSize / 2,
-          top: y - circleSize / 2,
-          child: Opacity(
-            opacity: clampedOpacity,
-            child: TipBubble(
-              type: tipType,
-              content: _hasTips ? tip.text : '',
-              color: _getColorForType(tipType),
-              index: index,
-              pulsate: !_hasTips && _tipsCirclesRendered,
-            ),
-          ),
+        // 添加显示/隐藏动画
+        return AnimatedBuilder(
+          animation: _tipsVisibilityAnimation,
+          builder: (context, child) {
+            // 当收起时，将 tips 向中心收缩
+            final animatedPosition = _hasTips && !_areTipsVisible
+                ? Offset(
+                    containerCenterX,
+                    containerCenterY,
+                  )
+                : Offset(x, y);
+
+            // 当收起时，降低透明度
+            final animatedOpacity = _hasTips && !_areTipsVisible
+                ? (1.0 - _tipsVisibilityAnimation.value) * clampedOpacity
+                : clampedOpacity;
+
+            // 当收起时，缩小尺寸
+            final animatedScale = _hasTips && !_areTipsVisible
+                ? 1.0 - _tipsVisibilityAnimation.value
+                : 1.0;
+
+            return Positioned(
+              left: x * (1 - _tipsVisibilityAnimation.value) +
+                  containerCenterX * _tipsVisibilityAnimation.value -
+                  (circleSize * animatedScale) / 2,
+              top: y * (1 - _tipsVisibilityAnimation.value) +
+                  containerCenterY * _tipsVisibilityAnimation.value -
+                  (circleSize * animatedScale) / 2,
+              child: Opacity(
+                opacity: animatedOpacity,
+                child: Transform.scale(
+                  scale: animatedScale,
+                  child: TipBubble(
+                    type: tipType,
+                    content: _hasTips ? tip.text : '',
+                    color: _getColorForType(tipType),
+                    index: index,
+                    pulsate: !_hasTips && _tipsCirclesRendered,
+                    onTap: _hasTips ? () => _handleTipSelected(tipType) : null,
+                  ),
+                ),
+              ),
+            );
+          },
         );
       }),
     );
@@ -449,6 +687,7 @@ class TipBubble extends StatelessWidget {
   final Color color;
   final int index;
   final bool pulsate;
+  final VoidCallback? onTap; // 添加点击回调
 
   const TipBubble({
     Key? key,
@@ -457,6 +696,7 @@ class TipBubble extends StatelessWidget {
     required this.color,
     required this.index,
     required this.pulsate,
+    this.onTap,
   }) : super(key: key);
 
   @override
@@ -587,6 +827,14 @@ class TipBubble extends StatelessWidget {
               );
             },
           );
+    }
+
+    // 添加点击手势
+    if (onTap != null) {
+      result = GestureDetector(
+        onTap: onTap,
+        child: result,
+      );
     }
 
     return result;
@@ -784,42 +1032,4 @@ class ColoredCirclePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
-}
-
-class RaysAndPointsPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width / 2;
-
-    // 绘制四条射线
-    final linePaint = Paint()
-      ..color = Colors.white.withOpacity(0.7)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.0;
-
-    const int rayCount = 4;
-    for (var i = 0; i < rayCount; i++) {
-      final angle = i * (2 * math.pi / rayCount);
-      final innerPoint = Offset(
-        center.dx + (radius * 0.2) * math.cos(angle),
-        center.dy + (radius * 0.2) * math.sin(angle),
-      );
-      final outerPoint = Offset(
-        center.dx + radius * math.cos(angle),
-        center.dy + radius * math.sin(angle),
-      );
-      canvas.drawLine(innerPoint, outerPoint, linePaint);
-
-      // 每条射线末端画一个点
-      final dotPaint = Paint()
-        ..color = Colors.white
-        ..style = PaintingStyle.fill;
-
-      canvas.drawCircle(outerPoint, 3.0, dotPaint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

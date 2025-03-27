@@ -69,6 +69,11 @@ class _CameraScreenState extends State<CameraScreen>
   // 图像流控制器
   StreamSubscription<CameraImage>? _imageStreamSubscription;
 
+  // 添加相机状态保存变量
+  bool _wasFrontCamera = false;
+  bool _wasFlashOn = false;
+  double _savedZoomLevel = 1.0;
+
   @override
   void initState() {
     super.initState();
@@ -108,30 +113,20 @@ class _CameraScreenState extends State<CameraScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     debugPrint('应用生命周期状态变化: $state');
 
-    // 当应用进入非活动状态时，释放相机资源
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused) {
-      // 安全释放相机资源
-      if (_controller != null) {
-        debugPrint('生命周期变化：释放相机资源');
+      // 保存当前相机状态
+      if (_controller != null && _controller!.value.isInitialized) {
+        _wasFrontCamera = _currentCameraIndex == _frontCameraIndex;
+        _wasFlashOn = _isFlashOn;
+        _savedZoomLevel = _currentZoomLevel;
+
+        // 只停止图像流，不释放相机控制器
         _stopImageStream();
-
-        final oldController = _controller;
-        _controller = null; // 先置空，避免其他代码访问到正在释放的控制器
-
-        // 使用异步方式释放，不阻塞UI
-        oldController?.dispose().then((_) {
-          debugPrint('相机资源释放完成');
-        }).catchError((error) {
-          debugPrint('释放相机资源时出错: $error');
-        });
-
-        setState(() {
-          _isInitialized = false;
-        });
+        debugPrint(
+            '已保存相机状态：前置=$_wasFrontCamera, 闪光灯=$_wasFlashOn, 缩放=$_savedZoomLevel');
       }
     } else if (state == AppLifecycleState.resumed) {
-      // 当应用恢复活动状态时，重新初始化相机
       debugPrint('应用恢复活动状态，重新初始化相机');
 
       // 使用微任务确保在UI更新后再初始化相机
@@ -232,10 +227,8 @@ class _CameraScreenState extends State<CameraScreen>
     if (_controller != null) {
       try {
         _stopImageStream();
-
         final oldController = _controller;
-        _controller = null; // 先置空，避免其他代码访问到正在释放的控制器
-
+        _controller = null;
         await oldController?.dispose();
       } catch (e) {
         debugPrint('释放旧相机控制器错误: $e');
@@ -254,25 +247,39 @@ class _CameraScreenState extends State<CameraScreen>
     try {
       int cameraIndex;
 
-      // 选择后置标准相机（如果有）
-      if (_standardCameraIndex >= 0) {
+      // 优先使用保存的相机状态
+      if (_wasFrontCamera && _frontCameraIndex >= 0) {
+        cameraIndex = _frontCameraIndex;
+        debugPrint('恢复前置相机状态');
+      } else if (_standardCameraIndex >= 0) {
         cameraIndex = _standardCameraIndex;
+        debugPrint('使用标准后置相机');
       } else if (_cameras.isNotEmpty) {
-        // 如果没有找到后置标准相机，选择第一个相机
         cameraIndex = 0;
+        debugPrint('使用默认相机');
       } else {
-        // 如果没有相机，直接返回
         return;
       }
 
       // 通过专门的方法切换到指定相机
       await _switchToCamera(cameraIndex);
 
+      // 恢复保存的相机设置
+      if (_controller != null && _controller!.value.isInitialized) {
+        // 恢复闪光灯状态
+        if (_wasFlashOn) {
+          await _toggleFlash();
+        }
+
+        // 恢复缩放级别
+        await _setZoomLevel(_savedZoomLevel);
+
+        debugPrint('已恢复相机设置：闪光灯=$_wasFlashOn, 缩放=$_savedZoomLevel');
+      }
+
       debugPrint('相机初始化完成');
     } catch (e) {
       debugPrint('初始化相机错误: $e');
-
-      // 确保UI状态反映初始化失败
       setState(() {
         _isInitialized = false;
       });
@@ -354,18 +361,23 @@ class _CameraScreenState extends State<CameraScreen>
     debugPrint('切换到摄像头索引: $cameraIndex, 名称: ${_cameras[cameraIndex].name}');
 
     try {
+      // 先将isInitialized设为false，避免在切换过程中显示错误的预览
+      setState(() {
+        _isInitialized = false;
+      });
+
       // 停止图像流
       _stopImageStream();
 
       // 安全释放现有控制器资源
-      CameraController? oldController = _controller;
-      // 先将_controller设为null，避免其他地方访问到正在dispose的控制器
-      _controller = null;
+      final oldController = _controller;
+      _controller = null; // 立即将控制器设为null，避免在释放过程中被访问
 
       // 异步释放旧控制器，避免阻塞UI
       if (oldController != null) {
         try {
           await oldController.dispose();
+          debugPrint('旧相机控制器已释放');
         } catch (e) {
           debugPrint('释放旧相机控制器错误: $e');
           // 错误处理但继续执行
@@ -373,34 +385,37 @@ class _CameraScreenState extends State<CameraScreen>
       }
 
       // 创建新的相机控制器
-      final CameraController cameraController = CameraController(
+      final CameraController newController = CameraController(
         _cameras[cameraIndex],
         ResolutionPreset.max,
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.yuv420,
       );
 
-      // 先初始化新控制器，成功后再更新引用
-      await cameraController.initialize();
+      // 更新控制器引用
+      _controller = newController;
+
+      // 初始化新控制器
+      await newController.initialize();
+      debugPrint('新相机控制器已初始化');
 
       // 确保组件仍然挂载
       if (!mounted) {
-        await cameraController.dispose();
+        await newController.dispose();
         return;
       }
 
-      // 更新控制器引用和索引
-      _controller = cameraController;
-      _currentCameraIndex = cameraIndex;
-
       // 获取新相机的缩放范围
-      _minZoomLevel = await cameraController.getMinZoomLevel();
-      _maxZoomLevel = await cameraController.getMaxZoomLevel();
+      _minZoomLevel = await newController.getMinZoomLevel();
+      _maxZoomLevel = await newController.getMaxZoomLevel();
 
       // 确保最小缩放级别为1.0
       if (_minZoomLevel < 1.0) {
         _minZoomLevel = 1.0;
       }
+
+      // 更新索引
+      _currentCameraIndex = cameraIndex;
 
       // 初始化完成后再更新UI状态
       setState(() {
@@ -411,6 +426,13 @@ class _CameraScreenState extends State<CameraScreen>
 
       // 最后再启动图像流
       _startImageStream();
+
+      // 延迟一小段时间后再次刷新UI，确保相机预览已经准备好
+      Future.delayed(const Duration(milliseconds: 200), () {
+        if (mounted) {
+          setState(() {});
+        }
+      });
     } catch (e) {
       debugPrint('切换相机错误: $e');
       // 出错时确保状态一致
@@ -979,7 +1001,6 @@ class _CameraScreenState extends State<CameraScreen>
         originalPath = cameraProvider.originalPhotoPath!;
       } else {
         // 否则拍摄新照片
-        // 注意：这里只是拍摄原始照片，裁剪将在后续处理中进行
         final XFile photo = await _controller!.takePicture();
         originalPath = photo.path;
 
@@ -991,60 +1012,36 @@ class _CameraScreenState extends State<CameraScreen>
           await _saveAsPng(originalPath, _currentAspectRatio);
       debugPrint('照片已处理并保存: $pngPath');
 
-      // 询问是否保存到相册
-      if (mounted) {
-        final save = await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('保存照片'),
-            content: const Text('是否保存到相册?'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('取消'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('保存'),
-              ),
-            ],
-          ),
-        );
+      // 自动保存到相册
+      try {
+        await cameraProvider.saveToGallery(pngPath);
 
-        if (save == true) {
-          try {
-            // 保存PNG格式照片到相册
-            await cameraProvider.saveToGallery(pngPath);
-
-            // 保存成功后显示提示
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('照片已保存到相册')),
-              );
-            }
-          } catch (e) {
-            debugPrint('保存照片到相册出错: $e');
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('保存失败')),
-              );
-            }
-          }
-        } else {
-          // 如果用户选择不保存到相册，仍然将照片添加到最近照片列表
-          // 这样用户可以在预览框中看到刚拍摄的照片
-          final metadata = PhotoMetadata(
-            path: pngPath,
-            timestamp: DateTime.now(),
-            isFromApp: true,
+        // 保存成功后显示提示
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('照片已保存到相册')),
           );
-
-          cameraProvider.addPhotoToRecentList(metadata);
         }
-
-        // 只重置拍摄状态，不影响最近照片列表
-        cameraProvider.reset();
+      } catch (e) {
+        debugPrint('保存照片到相册出错: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('保存失败')),
+          );
+        }
       }
+
+      // 将照片添加到最近照片列表
+      final metadata = PhotoMetadata(
+        path: pngPath,
+        timestamp: DateTime.now(),
+        isFromApp: true,
+      );
+
+      cameraProvider.addPhotoToRecentList(metadata);
+
+      // 重置拍摄状态
+      cameraProvider.reset();
     } catch (e) {
       debugPrint('拍照错误: $e');
       if (mounted) {
