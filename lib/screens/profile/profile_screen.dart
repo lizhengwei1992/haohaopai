@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../utils/app_theme.dart';
 import '../../providers/camera_provider.dart';
+import '../../login/auth_provider.dart';
+import '../../login/login_page.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -46,6 +48,42 @@ class ProfileScreen extends StatelessWidget {
                 child: Text('好好拍 v1.0.0',
                     style: TextStyle(color: Colors.grey, fontSize: 12)),
               ),
+
+              const SizedBox(height: 20),
+
+              // 退出登录按钮
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24.0, vertical: 8.0),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      // 调用AuthProvider的logout方法
+                      final authProvider =
+                          Provider.of<AuthProvider>(context, listen: false);
+                      authProvider.logout();
+
+                      // 退出到登录页
+                      Navigator.of(context).pushAndRemoveUntil(
+                        MaterialPageRoute(
+                            builder: (context) => const LoginPage()),
+                        (route) => false,
+                      );
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red.shade700,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                    ),
+                    child: const Text('退出登录', style: TextStyle(fontSize: 16)),
+                  ),
+                ),
+              ),
+
               const SizedBox(height: 16),
             ],
           );

@@ -106,8 +106,10 @@ class CameraProvider with ChangeNotifier {
   void resetUploadState() {
     _uploadState = UploadState.idle;
     _uploadProgress = 0.0;
+    _tips.clear(); // 清空tips列表
     _setState(CameraState.initial); // 重置相机状态
     _isTeachingInProgress = false; // 重置教我拍进行中标志
+    debugPrint('重置教我拍状态: 清空tips, 重置状态为initial');
     notifyListeners();
   }
 
@@ -504,20 +506,12 @@ class CameraProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  // 结束教我拍流程 - 重置状态
+  // 完全结束教我拍流程
   void finishTeaching() {
-    // 仅当正在进行教我拍流程时才执行
-    if (_isTeachingInProgress) {
-      _isTeachingInProgress = false;
-      _uploadState = UploadState.idle;
-      _uploadProgress = 0.0;
-
-      // 保留tips内容，但将状态切换回初始状态
-      _setState(CameraState.initial);
-
-      notifyListeners();
-      debugPrint('教我拍流程已结束');
-    }
+    _isTeachingInProgress = false;
+    _setState(CameraState.initial);
+    debugPrint('教我拍流程完全结束');
+    notifyListeners();
   }
 
   // 清除错误

@@ -5,17 +5,21 @@ import '../../models/shooting_tip.dart';
 import 'dart:ui';
 import 'package:provider/provider.dart';
 import '../../providers/camera_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
 class ShootingTipsAnimation extends StatefulWidget {
   final List<ShootingTip> tips;
   final bool isAnalyzing;
   final double uploadProgress;
+  final Function(bool) onTipsVisibilityChanged;
 
   const ShootingTipsAnimation({
     Key? key,
     required this.tips,
     required this.isAnalyzing,
     required this.uploadProgress,
+    required this.onTipsVisibilityChanged,
   }) : super(key: key);
 
   @override
@@ -23,7 +27,7 @@ class ShootingTipsAnimation extends StatefulWidget {
 }
 
 class _ShootingTipsAnimationState extends State<ShootingTipsAnimation>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   // 动画控制器
   late AnimationController _rotationController;
   late AnimationController _tipsRevealController;
@@ -49,6 +53,13 @@ class _ShootingTipsAnimationState extends State<ShootingTipsAnimation>
   late AnimationController _tipsVisibilityController;
   late Animation<double> _tipsVisibilityAnimation;
 
+  // 添加拖动相关状态
+  Offset _dragPosition = Offset.zero;
+  bool _isDragging = false;
+
+  // 判断是否是从后台恢复
+  bool _isRestoringState = false;
+
   // tips配置
   final List<Map<String, dynamic>> _tipsConfig = const [
     {'type': '构图', 'quadrant': '左上', 'angle': 135 * math.pi / 180},
@@ -61,7 +72,10 @@ class _ShootingTipsAnimationState extends State<ShootingTipsAnimation>
   void initState() {
     super.initState();
 
-    // 初始化旋转动画控制器
+    // 添加应用生命周期观察者
+    WidgetsBinding.instance.addObserver(this);
+
+    // 初始化旋转动画控制器 - 设置为4秒，确保4个tips均匀渲染
     _rotationController = AnimationController(
       duration: const Duration(seconds: 4),
       vsync: this,
@@ -101,109 +115,140 @@ class _ShootingTipsAnimationState extends State<ShootingTipsAnimation>
       curve: Curves.easeInOut,
     );
 
-    // 检查初始状态
-    _checkAndUpdateState();
+    // 检查应用是否是从后台恢复
+    _checkIfRestoringFromBackground();
+
+    // 延迟检查初始状态，避免在构建过程中调用setState
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkAndUpdateState();
+    });
+  }
+
+  // 监听应用生命周期变化
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      // 应用进入后台，保存当前状态
+      debugPrint('应用进入后台，保存当前状态');
+      _saveState();
+    } else if (state == AppLifecycleState.resumed) {
+      // 应用从后台恢复，标记为正在恢复状态
+      debugPrint('应用从后台恢复');
+      _isRestoringState = true;
+      _loadSavedState();
+    }
+  }
+
+  // 检查应用是否是从后台恢复
+  Future<void> _checkIfRestoringFromBackground() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      // 检查是否存在保存的状态
+      final hasSavedState = prefs.getBool('tips_was_in_background') ?? false;
+
+      if (hasSavedState) {
+        // 如果有保存的状态，则加载状态
+        _isRestoringState = true;
+        await _loadSavedState();
+        // 加载完后重置标记
+        await prefs.setBool('tips_was_in_background', false);
+      } else {
+        _isRestoringState = false;
+      }
+    } catch (e) {
+      debugPrint('检查是否从后台恢复出错: $e');
+    }
   }
 
   @override
   void didUpdateWidget(ShootingTipsAnimation oldWidget) {
     super.didUpdateWidget(oldWidget);
-    _checkAndUpdateState();
-  }
 
-  // 核心方法：检查状态变化并更新动画
-  void _checkAndUpdateState() {
-    // 检测"教我拍"按钮点击状态变化
-    if (widget.isAnalyzing != _lastIsAnalyzing) {
-      if (widget.isAnalyzing) {
-        // 开始新的分析 - 重置所有状态
-        _startNewAnalysis();
-      } else {
-        // 分析结束
-        _endAnalysis();
-      }
-      _lastIsAnalyzing = widget.isAnalyzing;
-    }
-
-    // 即使uploadState没有变化，但如果isAnalyzing为true，也确保动画正常运行
-    if (widget.isAnalyzing && !_rotationController.isAnimating) {
-      _rotationController.repeat();
-
-      // 如果tips显示动画未完成，确保它继续运行
-      if (!_tipsRevealController.isCompleted &&
-          !_tipsRevealController.isAnimating) {
-        _tipsRevealController.forward();
-      }
-    }
-
-    // 检测tips内容变化
-    bool tipsChanged = false;
-    if (widget.tips.length != _lastTips.length) {
-      tipsChanged = true;
+    // 只有当没有在恢复状态的时候，才正常更新状态
+    if (!_isRestoringState) {
+      _checkAndUpdateState();
     } else {
-      for (int i = 0; i < widget.tips.length; i++) {
-        if (widget.tips[i].text != _lastTips[i].text) {
-          tipsChanged = true;
-          break;
+      // 恢复完成后，重置标记
+      _isRestoringState = false;
+    }
+  }
+
+  // 从SharedPreferences加载保存的状态
+  Future<void> _loadSavedState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      // 加载有无tips状态
+      final hasTips = prefs.getBool('tips_hasTips') ?? false;
+
+      // 只有在有tips的情况下才恢复其他状态
+      if (hasTips) {
+        setState(() {
+          _hasTips = hasTips;
+
+          // 加载tips显示/隐藏状态
+          _areTipsVisible = prefs.getBool('tips_areTipsVisible') ?? true;
+
+          // 加载tips位置
+          final dragX = prefs.getDouble('tips_dragPositionX') ?? 0.0;
+          final dragY = prefs.getDouble('tips_dragPositionY') ?? 0.0;
+          if (dragX != 0.0 || dragY != 0.0) {
+            _dragPosition = Offset(dragX, dragY);
+          }
+
+          // 根据加载的状态设置动画控制器
+          if (!_areTipsVisible) {
+            _tipsVisibilityController.value = 1.0; // 如果tips是隐藏状态，设置动画值为终点
+          }
+        });
+
+        debugPrint(
+            '已加载tips状态: hasTips=$_hasTips, visible=$_areTipsVisible, position=$_dragPosition');
+      }
+    } catch (e) {
+      debugPrint('加载tips状态失败: $e');
+    }
+  }
+
+  // 保存当前状态到SharedPreferences
+  Future<void> _saveState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      // 标记应用处于后台
+      await prefs.setBool('tips_was_in_background', true);
+
+      // 保存有无tips状态
+      await prefs.setBool('tips_hasTips', _hasTips);
+
+      // 只有在有tips的情况下才保存其他状态
+      if (_hasTips) {
+        // 保存tips显示/隐藏状态
+        await prefs.setBool('tips_areTipsVisible', _areTipsVisible);
+
+        // 保存tips位置
+        await prefs.setDouble('tips_dragPositionX', _dragPosition.dx);
+        await prefs.setDouble('tips_dragPositionY', _dragPosition.dy);
+
+        // 如果需要，可以保存选中的tip
+        if (_selectedTipType != null) {
+          await prefs.setString('tips_selectedType', _selectedTipType!);
+        } else {
+          await prefs.remove('tips_selectedType');
         }
+
+        debugPrint(
+            '已保存tips状态: hasTips=$_hasTips, visible=$_areTipsVisible, position=$_dragPosition');
       }
-    }
-
-    // 如果tips内容有变化且非空
-    if (tipsChanged &&
-        widget.tips.isNotEmpty &&
-        widget.tips.any((tip) => tip.text.isNotEmpty)) {
-      setState(() {
-        _hasTips = true;
-        _lastTips = List.from(widget.tips);
-      });
-
-      // 停止旋转动画
-      _rotationController.stop();
-
-      // 确保所有tips圈显示完成
-      if (!_tipsRevealController.isCompleted) {
-        _tipsRevealController.animateTo(1.0,
-            duration: const Duration(milliseconds: 300));
-      }
-    }
-  }
-
-  // 开始新的分析流程
-  void _startNewAnalysis() {
-    // 完全重置所有状态
-    setState(() {
-      _hasTips = false;
-      _tipsCirclesRendered = false;
-      _lastTips = [];
-    });
-
-    // 停止并重置所有动画，确保从头开始
-    _rotationController.stop();
-    _rotationController.reset();
-
-    _tipsRevealController.stop();
-    _tipsRevealController.reset();
-
-    // 使用短延迟确保状态已重置后再启动动画
-    Future.microtask(() {
-      if (mounted) {
-        _rotationController.repeat(); // 开始旋转
-        _tipsRevealController.forward(); // 开始显示tips圈
-      }
-    });
-  }
-
-  // 结束分析流程
-  void _endAnalysis() {
-    // 如果没有收到tips内容，则停止旋转
-    if (!_hasTips) {
-      _rotationController.stop();
+    } catch (e) {
+      debugPrint('保存tips状态失败: $e');
     }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _rotationController.dispose();
     _tipsRevealController.dispose();
     _expandController.dispose();
@@ -248,9 +293,15 @@ class _ShootingTipsAnimationState extends State<ShootingTipsAnimation>
   // 处理中心区域点击，收起/显示tips
   void _toggleTipsVisibility() {
     debugPrint('执行_toggleTipsVisibility方法');
+    final oldVisibility = _areTipsVisible;
     setState(() {
       _areTipsVisible = !_areTipsVisible;
     });
+    debugPrint('tips可见性变化: $oldVisibility -> $_areTipsVisible');
+
+    // 通知父组件tips可见性变化
+    widget.onTipsVisibilityChanged(_areTipsVisible);
+    debugPrint('通知父组件tips可见性变化: $_areTipsVisible');
 
     if (_areTipsVisible) {
       debugPrint('显示tips，反向动画');
@@ -263,22 +314,56 @@ class _ShootingTipsAnimationState extends State<ShootingTipsAnimation>
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        // 磨砂背景
-        ClipRect(
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-            child: Container(
-              color: const Color(0xFF13131A).withOpacity(0.6),
-              width: MediaQuery.of(context).size.width,
-              height: MediaQuery.of(context).size.height,
-              child: CustomPaint(
-                size: Size(MediaQuery.of(context).size.width,
-                    MediaQuery.of(context).size.height),
-                painter: BackgroundDetailPainter(),
+    // 计算中心区域最终位置 - 考虑拖动位置
+    final screenSize = MediaQuery.of(context).size;
+    final defaultCenterY = screenSize.height / 2 - 200 - 30; // 默认位置
+
+    // 当tips隐藏且有拖动时使用拖动位置，否则使用默认位置
+    final useCustomPosition =
+        _hasTips && !_areTipsVisible && _dragPosition != Offset.zero;
+
+    // 当tips被收起且已经有提示内容时，只显示中心点，不占用全屏
+    if (_hasTips && !_areTipsVisible) {
+      return Stack(
+        children: [
+          if (useCustomPosition)
+            Positioned(
+              left: _dragPosition.dx - 40, // 中心点宽度的一半
+              top: _dragPosition.dy - 40, // 中心点高度的一半
+              child: _buildCenterWithColorCircle(),
+            )
+          else
+            Positioned(
+              left: 0,
+              right: 0,
+              top: defaultCenterY,
+              child: SizedBox(
+                height: 400,
+                width: screenSize.width,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    // 中心点和彩色圆环
+                    _buildCenterWithColorCircle(),
+                  ],
+                ),
               ),
             ),
+        ],
+      );
+    }
+
+    // 原有的全屏显示代码 - 只在tips可见时使用
+    return Stack(
+      children: [
+        // 移除磨砂背景，使用透明背景
+        Container(
+          color: Colors.transparent,
+          width: screenSize.width,
+          height: screenSize.height,
+          child: CustomPaint(
+            size: Size(screenSize.width, screenSize.height),
+            painter: BackgroundDetailPainter(),
           ),
         ),
 
@@ -294,179 +379,105 @@ class _ShootingTipsAnimationState extends State<ShootingTipsAnimation>
             ),
           )
         else
-          // 中心圆圈和动画效果 - 整体向上移动30px
-          Positioned(
-            left: 0,
-            right: 0,
-            top: MediaQuery.of(context).size.height / 2 - 200 - 30, // 增加偏移距离
-            child: SizedBox(
-              height: 400, // 增加高度，确保所有tips圈都能完全显示
-              width: MediaQuery.of(context).size.width,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  // 外圈白色圆环 - 在收起状态不显示
-                  if (_areTipsVisible || !_hasTips)
-                    Container(
-                      width: 300,
-                      height: 300,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: Colors.white.withOpacity(0.15),
-                          width: 1.5,
-                        ),
-                      ),
-                    ),
-
-                  // 第二圈白色圆环 - 在收起状态不显示
-                  if (_areTipsVisible || !_hasTips)
-                    Container(
-                      width: 220,
-                      height: 220,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: Colors.white.withOpacity(0.1),
-                          width: 1,
-                        ),
-                      ),
-                    ),
-
-                  // 星星点缀层 - 在收起状态不显示
-                  if (_areTipsVisible || !_hasTips)
-                    AnimatedBuilder(
-                      animation: _rotationController,
-                      builder: (context, child) {
-                        return CustomPaint(
-                          size: const Size(280, 280),
-                          painter: StarfieldPainter(
-                            animationValue:
-                                _rotationController.value * math.pi * 2,
-                          ),
-                        );
-                      },
-                    ),
-
-                  // 动态虚线圆环 - 旋转效果 - 在收起状态不显示
-                  if (_areTipsVisible || !_hasTips)
-                    AnimatedBuilder(
-                      animation: _rotationController,
-                      builder: (context, child) {
-                        return Transform.rotate(
-                          angle: _rotationController.value * 2 * math.pi,
-                          child: SizedBox(
-                            width: 270,
-                            height: 270,
-                            child: CustomPaint(
-                              painter: DashedCirclePainter(),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-
-                  // 动态内圈彩色圆环 - 反向旋转 - 始终显示
-                  AnimatedBuilder(
-                    animation: _rotationController,
-                    builder: (context, child) {
-                      return Transform.rotate(
-                        angle: -_rotationController.value * 2 * math.pi,
-                        child: SizedBox(
-                          width: 120,
-                          height: 120,
-                          child: CustomPaint(
-                            painter: ColoredCirclePainter(),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-
-                  // 中心圆点(白色) - 始终显示，添加点击功能
-                  GestureDetector(
-                    onTap: _hasTips
-                        ? () {
-                            debugPrint('中心点被点击，_hasTips=$_hasTips');
-                            _toggleTipsVisibility();
-                          }
-                        : null,
-                    child: Container(
-                      width: 50,
-                      height: 50,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: RadialGradient(
-                          colors: [
-                            Colors.white,
-                            Colors.white.withOpacity(0.8),
-                          ],
-                          stops: const [0.3, 1.0],
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.white.withOpacity(0.5),
-                            blurRadius: 10,
-                            spreadRadius: 2,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                  // 中心小圆点 - 始终显示
-                  // 注意：这个组件会遮挡中心点的点击区域，需要改进
-                  // 将小圆点包含在点击区域内
-                  Positioned(
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: Center(
-                      child: GestureDetector(
-                        onTap: _hasTips
-                            ? () {
-                                debugPrint('中心整体区域被点击，_hasTips=$_hasTips');
-                                _toggleTipsVisibility();
-                              }
-                            : null,
-                        child: Container(
-                          width: 70, // 增大点击区域
-                          height: 70, // 增大点击区域
-                          color: Colors.transparent, // 透明背景
-                          child: Center(
-                            child: Container(
-                              width: 20,
-                              height: 20,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Colors.black,
-                                border: Border.all(
-                                  color: Colors.white.withOpacity(0.8),
-                                  width: 2,
-                                ),
+          // 当tips隐藏且已有拖动位置时，使用绝对位置
+          useCustomPosition
+              ? Positioned(
+                  left: _dragPosition.dx - 40, // 中心点宽度的一半
+                  top: _dragPosition.dy - 40, // 中心点高度的一半
+                  child: _buildCenterWithColorCircle(),
+                )
+              : // 否则使用原来的布局方式
+              Positioned(
+                  left: 0,
+                  right: 0,
+                  top: defaultCenterY,
+                  child: SizedBox(
+                    height: 400,
+                    width: screenSize.width,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        // 外圈白色圆环 - 只在初始状态显示，点击中心恢复tips不显示
+                        if ((_areTipsVisible && !_hasTips) ||
+                            (!_areTipsVisible && !_hasTips))
+                          Container(
+                            width: 300,
+                            height: 300,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: Colors.white.withOpacity(0.15),
+                                width: 1.5,
                               ),
                             ),
                           ),
-                        ),
-                      ),
+
+                        // 第二圈白色圆环 - 只在初始状态显示，点击中心恢复tips不显示
+                        if ((_areTipsVisible && !_hasTips) ||
+                            (!_areTipsVisible && !_hasTips))
+                          Container(
+                            width: 220,
+                            height: 220,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: Colors.white.withOpacity(0.1),
+                                width: 1,
+                              ),
+                            ),
+                          ),
+
+                        // 星星点缀层 - 只在初始状态显示，点击中心恢复tips不显示
+                        if ((_areTipsVisible && !_hasTips) ||
+                            (!_areTipsVisible && !_hasTips))
+                          AnimatedBuilder(
+                            animation: _rotationController,
+                            builder: (context, child) {
+                              return CustomPaint(
+                                size: const Size(280, 280),
+                                painter: StarfieldPainter(
+                                  animationValue:
+                                      _rotationController.value * math.pi * 2,
+                                ),
+                              );
+                            },
+                          ),
+
+                        // 动态虚线圆环 - 只在初始状态显示，点击中心恢复tips不显示
+                        if ((_areTipsVisible && !_hasTips) ||
+                            (!_areTipsVisible && !_hasTips))
+                          AnimatedBuilder(
+                            animation: _rotationController,
+                            builder: (context, child) {
+                              return Transform.rotate(
+                                angle: _rotationController.value * 2 * math.pi,
+                                child: SizedBox(
+                                  width: 270,
+                                  height: 270,
+                                  child: CustomPaint(
+                                    painter: DashedCirclePainter(),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+
+                        // 中心点和彩色圆环
+                        _buildCenterWithColorCircle(),
+
+                        // 旋转的Tips圈 - 在初始状态或tips需要显示时显示
+                        if (_areTipsVisible || !_hasTips)
+                          AnimatedBuilder(
+                            animation: _rotationController,
+                            builder: (context, child) {
+                              final screenCenterX = screenSize.width / 2;
+                              return _buildTipsWithRotation(screenCenterX);
+                            },
+                          ),
+                      ],
                     ),
                   ),
-
-                  // 旋转的Tips圈 - 显示/隐藏受控制
-                  if (_areTipsVisible || !_hasTips)
-                    AnimatedBuilder(
-                      animation: _rotationController,
-                      builder: (context, child) {
-                        final screenCenterX =
-                            MediaQuery.of(context).size.width / 2;
-                        return _buildTipsWithRotation(screenCenterX);
-                      },
-                    ),
-                ],
-              ),
-            ),
-          ),
+                ),
       ],
     );
   }
@@ -606,22 +617,29 @@ class _ShootingTipsAnimationState extends State<ShootingTipsAnimation>
             y = containerCenterY + centerRadius * math.sin(angle);
         }
 
-        // 计算透明度 - 简化为三种状态
+        // 计算透明度 - 精确控制每个tip的出现时间
         double opacity = 0.0;
 
         if (_hasTips) {
           // 1. 已收到tips内容 - 完全显示
           opacity = 1.0;
         } else if (!_tipsCirclesRendered) {
-          // 2. 首次渲染中 - 根据旋转进度依次显示
+          // 2. 首次渲染中 - 均匀渲染
           final rotationProgress = _rotationController.value;
+
+          // 计算每个tip的出现阈值，均匀分布在0-1之间
           final appearThreshold = index / _tipsConfig.length;
 
+          // 计算出现持续时间占总时间的比例，确保均匀分布
+          final appearDuration = 1.0 / _tipsConfig.length;
+
           if (rotationProgress >= appearThreshold) {
-            final segmentSize = 1.0 / _tipsConfig.length;
-            final localProgress =
-                (rotationProgress - appearThreshold) / segmentSize;
-            opacity = math.min(1.0, localProgress * 3.0);
+            // 计算当前tip渲染的进度
+            final progress = math.min(
+                1.0, (rotationProgress - appearThreshold) / appearDuration);
+
+            // 使用缓动函数使过渡更平滑
+            opacity = Curves.easeOut.transform(progress);
           }
         } else {
           // 3. 渲染完成但无内容 - 保持显示
@@ -678,6 +696,244 @@ class _ShootingTipsAnimationState extends State<ShootingTipsAnimation>
         );
       }),
     );
+  }
+
+  // 新方法：构建中心点和彩色圆环，带有拖动功能
+  Widget _buildCenterWithColorCircle() {
+    // 根据tips是否显示决定圆环大小
+    final circleSize = _hasTips && !_areTipsVisible ? 80.0 : 120.0;
+
+    return GestureDetector(
+      // 点击处理
+      onTap: () {
+        if (_hasTips) {
+          debugPrint('中心区域被点击：$_hasTips, $_areTipsVisible');
+          _toggleTipsVisibility();
+        }
+      },
+      // 长按开始拖动，改为普通拖动，不需要长按
+      onPanStart: (details) {
+        if (_hasTips && !_areTipsVisible) {
+          setState(() {
+            _isDragging = true;
+
+            // 如果是第一次拖动，初始化拖动位置为当前位置
+            if (_dragPosition == Offset.zero) {
+              // 使用当前组件在屏幕上的位置作为初始拖动位置
+              final screenSize = MediaQuery.of(context).size;
+              final defaultCenterY = screenSize.height / 2 - 200 - 30;
+              final screenCenterX = screenSize.width / 2;
+
+              // 使用当前视图中心位置
+              _dragPosition = Offset(screenCenterX, defaultCenterY + 200);
+            }
+          });
+        }
+      },
+
+      // 拖动更新位置
+      onPanUpdate: (details) {
+        if (_hasTips && !_areTipsVisible && _isDragging) {
+          setState(() {
+            // 获取屏幕尺寸，用于限制拖动范围
+            final screenSize = MediaQuery.of(context).size;
+
+            // 设置安全区域 - 更严格的限制
+            final topLimit = screenSize.height * 0.10; // 顶部安全区域 - 刘海下方
+            final bottomLimit = screenSize.height * 0.80; // 底部安全区域 - 相机控制按钮的上边缘
+
+            // 计算新位置
+            double newX = _dragPosition.dx + details.delta.dx;
+            double newY = _dragPosition.dy + details.delta.dy;
+
+            // 限制位置在安全区域内
+            // 考虑到中心点的半径约为25px，边缘额外加10px缓冲
+            newX = newX.clamp(35.0, screenSize.width - 35.0);
+            newY = newY.clamp(topLimit, bottomLimit);
+
+            // 更新拖动位置
+            _dragPosition = Offset(newX, newY);
+          });
+        }
+      },
+      // 拖动结束
+      onPanEnd: (_) {
+        if (_isDragging) {
+          setState(() {
+            _isDragging = false;
+          });
+        }
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300), // 添加尺寸变化的动画
+        width: circleSize, // 根据状态使用不同尺寸
+        height: circleSize, // 根据状态使用不同尺寸
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            // 动态内圈彩色圆环 - 修改为顺时针旋转 (去掉负号)
+            AnimatedBuilder(
+              animation: _rotationController,
+              builder: (context, child) {
+                return Transform.rotate(
+                  angle: _rotationController.value * 2 * math.pi, // 去掉负号，改为顺时针
+                  child: SizedBox(
+                    width: circleSize,
+                    height: circleSize,
+                    child: CustomPaint(
+                      painter: ColoredCirclePainter(),
+                    ),
+                  ),
+                );
+              },
+            ),
+
+            // 恢复原来的中心点设计，去掉图标
+            Container(
+              width: 50, // 中心圆点尺寸
+              height: 50, // 中心圆点尺寸
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    Colors.white,
+                    Colors.white.withOpacity(0.8),
+                  ],
+                  stops: const [0.3, 1.0],
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.white.withOpacity(0.5),
+                    blurRadius: 10,
+                    spreadRadius: 2,
+                  ),
+                ],
+              ),
+            ),
+
+            // 中心小圆点
+            Container(
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.black,
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.8),
+                  width: 2,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 核心方法：检查状态变化并更新动画
+  void _checkAndUpdateState() {
+    // 检测"教我拍"按钮点击状态变化
+    if (widget.isAnalyzing != _lastIsAnalyzing) {
+      if (widget.isAnalyzing) {
+        // 开始新的分析 - 重置所有状态
+        _startNewAnalysis();
+      } else {
+        // 分析结束
+        _endAnalysis();
+      }
+      _lastIsAnalyzing = widget.isAnalyzing;
+    }
+
+    // 即使uploadState没有变化，但如果isAnalyzing为true，也确保动画正常运行
+    if (widget.isAnalyzing && !_rotationController.isAnimating) {
+      _rotationController.repeat();
+
+      // 如果tips显示动画未完成，确保它继续运行
+      if (!_tipsRevealController.isCompleted &&
+          !_tipsRevealController.isAnimating) {
+        _tipsRevealController.forward();
+      }
+    }
+
+    // 检测tips内容变化
+    bool tipsChanged = false;
+    if (widget.tips.length != _lastTips.length) {
+      tipsChanged = true;
+    } else {
+      for (int i = 0; i < widget.tips.length; i++) {
+        if (widget.tips[i].text != _lastTips[i].text) {
+          tipsChanged = true;
+          break;
+        }
+      }
+    }
+
+    // 如果tips内容有变化且非空
+    if (tipsChanged &&
+        widget.tips.isNotEmpty &&
+        widget.tips.any((tip) => tip.text.isNotEmpty)) {
+      setState(() {
+        _hasTips = true;
+        _lastTips = List.from(widget.tips);
+      });
+
+      // 停止旋转动画
+      _rotationController.stop();
+
+      // 确保所有tips圈显示完成 - 使用更短的动画时间，加快渲染
+      if (!_tipsRevealController.isCompleted) {
+        _tipsRevealController.animateTo(1.0,
+            duration: const Duration(milliseconds: 200));
+      }
+    }
+  }
+
+  // 开始新的分析流程
+  void _startNewAnalysis() {
+    debugPrint('开始新的分析流程');
+    // 完全重置所有状态
+    setState(() {
+      _hasTips = false;
+      _tipsCirclesRendered = false;
+      _lastTips = [];
+      // 重要：确保tips始终处于可见状态
+      _areTipsVisible = true;
+      // 重置拖动位置
+      _dragPosition = Offset.zero;
+    });
+
+    // 重置tips显示/隐藏控制器
+    _tipsVisibilityController.value = 0.0;
+
+    // 延迟通知父组件状态变化，避免在构建过程中调用setState
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // 通知父组件tips变为可见状态
+      widget.onTipsVisibilityChanged(true);
+      debugPrint('通知父组件重置tips可见性为: true');
+    });
+
+    // 停止并重置所有动画，确保从头开始
+    _rotationController.stop();
+    _rotationController.reset();
+
+    _tipsRevealController.stop();
+    _tipsRevealController.reset();
+
+    // 使用短延迟确保状态已重置后再启动动画
+    Future.microtask(() {
+      if (mounted) {
+        _rotationController.repeat(); // 开始旋转
+        _tipsRevealController.forward(); // 开始显示tips圈
+      }
+    });
+  }
+
+  // 结束分析流程
+  void _endAnalysis() {
+    // 如果没有收到tips内容，则停止旋转
+    if (!_hasTips) {
+      _rotationController.stop();
+    }
   }
 }
 
@@ -739,26 +995,8 @@ class TipBubble extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(height: 6),
-            // 重置按钮
-            SizedBox(
-              height: 18,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.circle_outlined,
-                      size: 10, color: Colors.white),
-                  const SizedBox(width: 4),
-                  Text(
-                    'Resets',
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: Colors.white.withOpacity(0.7),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            const SizedBox(height: 10), // 调整间距
+            // 移除reset按钮，直接显示内容
             if (content.isNotEmpty)
               Expanded(
                 child: Text(
@@ -866,8 +1104,8 @@ class StarfieldPainter extends CustomPainter {
       const Color(0xFFA7FFD6), // 淡绿色
     ];
 
-    // 画不同大小和亮度的星星
-    for (int i = 0; i < 120; i++) {
+    // 减少星星数量从120个到60个，减轻渲染负担
+    for (int i = 0; i < 60; i++) {
       final angle = random.nextDouble() * math.pi * 2;
       final distance =
           minRadius + random.nextDouble() * (maxRadius - minRadius);
@@ -875,9 +1113,10 @@ class StarfieldPainter extends CustomPainter {
       final y = center.dy + math.sin(angle) * distance;
 
       // 使用随机数加上动画值，创造出随机闪烁的效果
+      // 降低闪烁频率，从0.5改为0.25
       final timeOffset = random.nextDouble() * math.pi * 2;
       final flickerValue =
-          (math.sin(animationValue * 0.5 + timeOffset) + 1) / 2; // 0到1的值
+          (math.sin(animationValue * 0.25 + timeOffset) + 1) / 2; // 0到1的值
 
       final brightness =
           0.2 + random.nextDouble() * 0.8 * (0.7 + flickerValue * 0.3);
@@ -898,8 +1137,8 @@ class StarfieldPainter extends CustomPainter {
       starPaint.color = starColor.withOpacity(brightness);
       canvas.drawCircle(Offset(x, y), starSize, starPaint);
 
-      // 为部分星星添加光晕效果
-      if (random.nextDouble() > 0.8) {
+      // 减少光晕星星的数量，从20%到10%
+      if (random.nextDouble() > 0.9) {
         canvas.drawCircle(
             Offset(x, y),
             starSize * 2 * (0.8 + flickerValue * 0.4),
@@ -921,9 +1160,9 @@ class BackgroundDetailPainter extends CustomPainter {
       ..color = Colors.white.withOpacity(0.15)
       ..style = PaintingStyle.fill;
 
-    // 随机点缀背景
+    // 减少背景点数量从200到100
     final random = math.Random(42);
-    for (int i = 0; i < 200; i++) {
+    for (int i = 0; i < 100; i++) {
       final x = random.nextDouble() * size.width;
       final y = random.nextDouble() * size.height;
       final radius = random.nextDouble() * 1.5;
@@ -966,8 +1205,8 @@ class DashedCirclePainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.0;
 
-    // 画虚线圆圈
-    final dashCount = 100;
+    // 减少虚线点的数量从100到60
+    final dashCount = 60;
     for (var i = 0; i < dashCount; i++) {
       final startAngle = (i * 2 * math.pi) / dashCount;
       canvas.drawArc(
@@ -979,8 +1218,9 @@ class DashedCirclePainter extends CustomPainter {
       );
     }
 
-    // 画内圈虚线
-    for (var i = 0; i < dashCount; i += 3) {
+    // 减少内圈虚线点数量
+    for (var i = 0; i < dashCount; i += 4) {
+      // 从i+=3改为i+=4
       final startAngle = (i * 2 * math.pi) / dashCount;
       canvas.drawArc(
         Rect.fromCircle(center: center, radius: radius * 0.6),

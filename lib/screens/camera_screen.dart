@@ -4,6 +4,7 @@ import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
+import 'dart:ui';
 import 'package:path/path.dart' as path;
 import 'package:provider/provider.dart';
 import 'settings/settings_screen.dart';
@@ -20,9 +21,10 @@ import '../widgets/camera/camera_control_icons.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:image/image.dart' as img;
 import '../models/photo_metadata.dart';
-import 'dart:math' as Math;
 import '../widgets/camera/shooting_tips_animation.dart';
 import 'dart:async';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 
 class CameraScreen extends StatefulWidget {
   const CameraScreen({super.key});
@@ -73,6 +75,9 @@ class _CameraScreenState extends State<CameraScreen>
   bool _wasFrontCamera = false;
   bool _wasFlashOn = false;
   double _savedZoomLevel = 1.0;
+
+  // 添加tips可见性状态
+  bool _areTipsVisible = true;
 
   @override
   void initState() {
@@ -784,32 +789,56 @@ class _CameraScreenState extends State<CameraScreen>
                                     );
                                   }
 
-                                  // 正常预览
+                                  // 使用FilteredCameraPreview而不是普通CameraPreview
                                   return FilteredCameraPreview(
                                     filterType: _currentFilter,
-                                    child: OverflowBox(
-                                      alignment: Alignment.center,
-                                      child: FittedBox(
-                                        fit: BoxFit.cover,
-                                        child: SizedBox(
-                                          width: screenWidth,
-                                          height:
-                                              screenWidth * cameraAspectRatio,
-                                          child: CameraPreview(_controller!),
+                                    child: Stack(
+                                      fit: StackFit.expand,
+                                      children: [
+                                        // 相机预览和模糊效果
+                                        OverflowBox(
+                                          alignment: Alignment.center,
+                                          child: FittedBox(
+                                            fit: BoxFit.cover,
+                                            child: SizedBox(
+                                              width: screenWidth,
+                                              height: screenWidth *
+                                                  cameraAspectRatio,
+                                              child: ClipRect(
+                                                child: BackdropFilter(
+                                                  filter: ImageFilter.blur(
+                                                    sigmaX: 0, // 移除模糊效果，始终为0
+                                                    sigmaY: 0, // 移除模糊效果，始终为0
+                                                  ),
+                                                  child: CameraPreview(
+                                                      _controller!),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
                                         ),
-                                      ),
+
+                                        // 九宫格 - 只在tips收起时显示
+                                        if (!_areTipsVisible &&
+                                            (showingTips || analyzing))
+                                          IgnorePointer(
+                                            // 使用IgnorePointer确保九宫格不会阻止相机预览区域的手势事件
+                                            child: SizedBox(
+                                              width: screenWidth,
+                                              height: screenWidth *
+                                                  cameraAspectRatio,
+                                              child: CustomPaint(
+                                                painter: GridPainter(),
+                                              ),
+                                            ),
+                                          ),
+                                      ],
                                     ),
                                   );
                                 },
                               ),
                             ),
                           ),
-
-                          // 相机网格线 - 移到GestureDetector之外，确保不会阻挡手势
-                          if (showGridLines)
-                            IgnorePointer(
-                              child: CameraGridLines(showGrid: true),
-                            ),
 
                           // 显示对焦框
                           if (_showFocusPoint && _focusPoint != null)
@@ -823,13 +852,14 @@ class _CameraScreenState extends State<CameraScreen>
                   ),
                 ),
 
-                // 拍摄建议和分析动画
+                // 拍摄建议和分析动画 - 单独放在一个层，确保正常接收点击事件
                 if (showingTips || analyzing)
                   Positioned.fill(
                     child: ShootingTipsAnimation(
                       tips: cameraProvider.tips,
                       isAnalyzing: analyzing,
                       uploadProgress: cameraProvider.uploadProgress,
+                      onTipsVisibilityChanged: _handleTipsVisibilityChanged,
                     ),
                   ),
 
@@ -991,6 +1021,14 @@ class _CameraScreenState extends State<CameraScreen>
       return;
     }
 
+    // 拍摄时只发出声音，不震动
+    // 播放拍照声音
+    try {
+      SystemSound.play(SystemSoundType.click);
+    } catch (e) {
+      debugPrint('播放拍照声音失败: $e');
+    }
+
     final cameraProvider = Provider.of<CameraProvider>(context, listen: false);
     final showingTips = cameraProvider.state == CameraState.showingTips;
     String originalPath;
@@ -1015,13 +1053,6 @@ class _CameraScreenState extends State<CameraScreen>
       // 自动保存到相册
       try {
         await cameraProvider.saveToGallery(pngPath);
-
-        // 保存成功后显示提示
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('照片已保存到相册')),
-          );
-        }
       } catch (e) {
         debugPrint('保存照片到相册出错: $e');
         if (mounted) {
@@ -1233,8 +1264,20 @@ class _CameraScreenState extends State<CameraScreen>
       return;
     }
 
+    // 教我拍只震动不发声
+    HapticFeedback.mediumImpact();
+
     // 先重置状态，确保每次点击都会触发完整的流程
     cameraProvider.resetUploadState();
+
+    // 重置tips可见性状态，确保每次点击教我拍时都显示tips
+    Future.microtask(() {
+      if (mounted) {
+        setState(() {
+          _areTipsVisible = true;
+        });
+      }
+    });
 
     // 在此处立即设置上传状态为进行中，确保按钮立即变为灰色
     cameraProvider.setUploadState(UploadState.uploading);
@@ -1371,18 +1414,23 @@ class _CameraScreenState extends State<CameraScreen>
   // 显示全屏图像
   void _showFullScreenImage(BuildContext context, String imagePath) {
     try {
-      // 在导航前安全释放相机资源
+      // 记录当前相机状态，以便返回时恢复
+      bool wasStreaming = false;
+      double savedZoomLevel = _currentZoomLevel;
+
       if (_controller != null && _controller!.value.isInitialized) {
-        _stopImageStream();
+        // 如果正在使用图像流，暂时停止
+        if (_controller!.value.isStreamingImages) {
+          wasStreaming = true;
+          _stopImageStream(); // 暂停图像流
+        }
 
-        final oldController = _controller;
-        _controller = null;
+        // 暂停预览显示
+        final cameraProvider =
+            Provider.of<CameraProvider>(context, listen: false);
+        cameraProvider.pausePreview();
 
-        oldController?.dispose().catchError((e) {
-          debugPrint('释放相机资源错误: $e');
-        });
-
-        _isInitialized = false;
+        debugPrint('🖼️ 查看照片: $imagePath，已暂停相机预览');
       }
 
       Navigator.push(
@@ -1391,13 +1439,37 @@ class _CameraScreenState extends State<CameraScreen>
           builder: (context) => FullScreenImage(imagePath: imagePath),
         ),
       ).then((_) {
-        // 返回时重新初始化相机
-        if (mounted) {
-          _initializeCamera();
+        // 返回时恢复相机预览
+        if (mounted &&
+            _controller != null &&
+            _controller!.value.isInitialized) {
+          // 恢复预览显示
+          final cameraProvider =
+              Provider.of<CameraProvider>(context, listen: false);
+          cameraProvider.resumePreview();
+
+          // 如果之前在使用图像流，恢复图像流
+          if (wasStreaming) {
+            _startImageStream();
+          }
+
+          // 恢复缩放级别
+          if (_currentZoomLevel != savedZoomLevel) {
+            _setZoomLevel(savedZoomLevel);
+          }
+
+          debugPrint('🖼️ 从照片查看返回，已恢复相机预览');
         }
       });
     } catch (e) {
-      debugPrint('显示全屏图像错误: $e');
+      debugPrint('🖼️ 显示全屏图像错误: $e');
+
+      // 即使出错也要确保相机预览恢复
+      if (mounted && _controller != null && _controller!.value.isInitialized) {
+        final cameraProvider =
+            Provider.of<CameraProvider>(context, listen: false);
+        cameraProvider.resumePreview();
+      }
     }
   }
 
@@ -1488,6 +1560,21 @@ class _CameraScreenState extends State<CameraScreen>
         debugPrint('显示滤镜选择器');
       } else {
         debugPrint('隐藏滤镜选择器');
+      }
+    });
+  }
+
+  // 处理tips可见性变化
+  void _handleTipsVisibilityChanged(bool isVisible) {
+    debugPrint('tips可见性变化回调触发: $isVisible -> $_areTipsVisible');
+
+    // 使用微任务延迟状态更新，避免在构建过程中调用setState
+    Future.microtask(() {
+      if (mounted) {
+        setState(() {
+          _areTipsVisible = isVisible;
+        });
+        debugPrint('tips可见性已更新: $_areTipsVisible，将更新UI');
       }
     });
   }
@@ -1658,4 +1745,38 @@ class FullScreenImage extends StatelessWidget {
       ),
     );
   }
+}
+
+// 添加九宫格绘制器
+class GridPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.white.withOpacity(0.3)
+      ..strokeWidth = 1.0
+      ..style = PaintingStyle.stroke;
+
+    // 绘制垂直线
+    for (int i = 1; i < 3; i++) {
+      final x = size.width * (i / 3);
+      canvas.drawLine(
+        Offset(x, 0),
+        Offset(x, size.height),
+        paint,
+      );
+    }
+
+    // 绘制水平线
+    for (int i = 1; i < 3; i++) {
+      final y = size.height * (i / 3);
+      canvas.drawLine(
+        Offset(0, y),
+        Offset(size.width, y),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

@@ -9,6 +9,8 @@ import 'screens/settings/settings_screen.dart';
 import 'providers/camera_provider.dart';
 import 'providers/settings_provider.dart';
 import 'utils/app_theme.dart';
+import 'login/auth_provider.dart';
+import 'login/login_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -28,6 +30,7 @@ Future<void> main() async {
       providers: [
         ChangeNotifierProvider(create: (_) => CameraProvider()),
         ChangeNotifierProvider(create: (_) => SettingsProvider()),
+        ChangeNotifierProvider(create: (_) => AuthProvider()),
       ],
       child: const MyApp(),
     ),
@@ -43,8 +46,9 @@ class MyApp extends StatelessWidget {
       title: '好好拍',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
-      home: const CameraScreen(),
+      home: const LoginPage(),
       routes: {
+        '/camera': (context) => const CameraScreen(),
         '/profile': (context) => const ProfileScreen(),
         '/settings': (context) => const SettingsScreen(),
       },
