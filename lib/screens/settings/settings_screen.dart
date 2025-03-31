@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../utils/app_theme.dart';
+import '../../login/auth_provider.dart';
+import '../../login/login_page.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -119,6 +121,63 @@ class SettingsScreen extends StatelessWidget {
                   value: settings.enableLocation,
                   onChanged: (value) => settings.setEnableLocation(value),
                   activeColor: AppTheme.primaryColor,
+                ),
+              ),
+
+              _buildSectionHeader(context, '账户'),
+
+              // 退出登录按钮
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: ListTile(
+                  title:
+                      const Text('退出登录', style: TextStyle(color: Colors.white)),
+                  trailing: const Icon(Icons.logout, color: Colors.red),
+                  onTap: () {
+                    // 显示确认对话框
+                    showDialog(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        backgroundColor: const Color(0xFF121530),
+                        title: const Text('退出登录',
+                            style: TextStyle(color: Colors.white)),
+                        content: const Text('确定要退出当前账号吗？',
+                            style: TextStyle(color: Colors.white70)),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text('取消',
+                                style: TextStyle(color: Colors.white70)),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              // 退出登录
+                              final authProvider = Provider.of<AuthProvider>(
+                                  context,
+                                  listen: false);
+                              authProvider.logout();
+
+                              // 关闭对话框
+                              Navigator.pop(context);
+
+                              // 退出到登录页
+                              Navigator.of(context).pushAndRemoveUntil(
+                                MaterialPageRoute(
+                                    builder: (context) => const LoginPage()),
+                                (route) => false,
+                              );
+                            },
+                            child: const Text('确定',
+                                style: TextStyle(color: Colors.red)),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
                 ),
               ),
 
