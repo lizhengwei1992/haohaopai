@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:haohaopai/screens/camera_screen.dart';
 import 'package:haohaopai/login/auth_provider.dart';
+import 'package:haohaopai/screens/profile/profile_screen.dart';
 
 class PhoneLoginPage extends StatefulWidget {
   const PhoneLoginPage({Key? key}) : super(key: key);
@@ -47,7 +48,7 @@ class _PhoneLoginPageState extends State<PhoneLoginPage> {
 
     if (success) {
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (context) => const CameraScreen()),
+        MaterialPageRoute(builder: (context) => const ProfileScreen()),
         (route) => false,
       );
     } else {

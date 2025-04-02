@@ -4,6 +4,7 @@ import '../../providers/camera_provider.dart';
 import 'dart:io';
 import '../../widgets/camera/camera_filters.dart';
 import '../../widgets/camera/camera_control_icons.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 class CameraControls extends StatefulWidget {
   final VoidCallback onTeachPress;
@@ -167,32 +168,39 @@ class CameraControlsState extends State<CameraControls> {
                                 height: 56,
                                 decoration: BoxDecoration(
                                   borderRadius: BorderRadius.circular(12),
-                                  color: Colors.black.withOpacity(0.5),
                                   border: Border.all(
-                                      color: Colors.white.withOpacity(0.5),
-                                      width: 1),
+                                    color: const Color(0xFFA0A9FC), // A0A9FC颜色
+                                    width: 1.5,
+                                  ),
                                 ),
                                 child: hasRecentPhotos
                                     ? ClipRRect(
-                                        borderRadius: BorderRadius.circular(12),
+                                        borderRadius: BorderRadius.circular(10),
                                         child: Image.file(
                                           File(
                                               provider.recentPhotos.first.path),
                                           fit: BoxFit.cover,
+                                          width: 54,
+                                          height: 54,
                                           errorBuilder:
                                               (context, error, stackTrace) {
-                                            return const Icon(
-                                              Icons.photo_library,
-                                              color: Colors.white,
-                                              size: 32,
+                                            // 如果图片加载失败，显示默认图标
+                                            return Center(
+                                              child: SvgPicture.asset(
+                                                'assets/icons/photo_album.svg',
+                                                width: 45,
+                                                height: 45,
+                                              ),
                                             );
                                           },
                                         ),
                                       )
-                                    : const Icon(
-                                        Icons.photo_library,
-                                        color: Colors.white,
-                                        size: 32,
+                                    : Center(
+                                        child: SvgPicture.asset(
+                                          'assets/icons/photo_album.svg',
+                                          width: 45,
+                                          height: 45,
+                                        ),
                                       ),
                               ),
                             );
@@ -337,6 +345,20 @@ class CameraControlsState extends State<CameraControls> {
             onTap: _toggleFilterSelector,
             child: const FilterIcon(),
           ),
+
+          // 相机翻转按钮
+          CameraControlButton(
+            onTap: widget.onSwitchCameraPress,
+            child: SvgPicture.asset(
+              'assets/icons/camera_reverse.svg',
+              width: 24,
+              height: 24,
+              colorFilter: const ColorFilter.mode(
+                Colors.white,
+                BlendMode.srcIn,
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -352,7 +374,8 @@ class CameraControlsState extends State<CameraControls> {
     if (_expandedControl == 'aspectRatio') {
       return Center(
         child: Container(
-          width: MediaQuery.of(context).size.width * 0.8, // 设置为屏幕宽度的80%
+          width: MediaQuery.of(context).size.width *
+              0.9, // 增加宽度从80%到90%，确保有足够空间放置更多按钮
           height: 45, // 固定高度为45，比父容器的50略小
           decoration: BoxDecoration(
             color:
@@ -440,10 +463,11 @@ class CameraControlsState extends State<CameraControls> {
           height: 40,
           child: Stack(
             children: [
-              // 曝光控制器 - 居中显示并设置为屏幕宽度的65%（从70%减小）
+              // 曝光控制器 - 居中显示并设置为屏幕宽度的55%（从65%减小）
               Center(
                 child: Container(
-                  width: MediaQuery.of(context).size.width * 0.65, // 从70%减小到65%
+                  width: MediaQuery.of(context).size.width *
+                      0.55, // 从65%减小到55%，为右侧按钮留出空间
                   height: 40,
                   child: ExposureControl(
                     value: _currentExposure,
@@ -497,30 +521,56 @@ class CameraControlsState extends State<CameraControls> {
     return GestureDetector(
       onTap: widget.onCapturePress,
       child: Container(
-        width: 68,
-        height: 68,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white, width: 3),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.3),
-              blurRadius: 8,
-              spreadRadius: 2,
-            ),
-          ],
-        ),
-        child: Center(
-          child: Container(
-            width: 58,
-            height: 58,
-            decoration: const BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.white,
-            ),
-          ),
-        ),
-      ),
+          width: 70,
+          height: 70,
+          child: Stack(children: <Widget>[
+            Positioned(
+                top: 0,
+                left: 0,
+                child: Container(
+                    width: 70,
+                    height: 70,
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: const Color.fromRGBO(52, 137, 142, 1),
+                        width: 3,
+                      ),
+                      borderRadius:
+                          const BorderRadius.all(Radius.elliptical(70, 70)),
+                    ))),
+            Positioned(
+                top: 0,
+                left: 0,
+                child: Container(
+                    width: 70,
+                    height: 70,
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: const Color.fromRGBO(8, 229, 235, 1),
+                        width: 3,
+                      ),
+                      borderRadius:
+                          const BorderRadius.all(Radius.elliptical(70, 70)),
+                    ))),
+            Positioned(
+                top: 5,
+                left: 5,
+                child: Container(
+                    width: 60,
+                    height: 60,
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                          begin: Alignment(
+                              0.11723876744508743, 0.9628744125366211),
+                          end: Alignment(
+                              -0.908519446849823, 0.28769782185554504),
+                          colors: [
+                            Color.fromRGBO(121, 113, 181, 1),
+                            Color.fromRGBO(32, 34, 67, 1)
+                          ]),
+                      borderRadius: BorderRadius.all(Radius.elliptical(60, 60)),
+                    ))),
+          ])),
     );
   }
 }
@@ -566,7 +616,7 @@ class _ExposureControlState extends State<ExposureControl> {
   void _updateValue(double dx) {
     // 计算拖动的相对距离，转换为曝光值变化
     final double controlWidth =
-        MediaQuery.of(context).size.width * 0.65; // 控件宽度为屏幕宽度的65%
+        MediaQuery.of(context).size.width * 0.55; // 控件宽度为屏幕宽度的55%
     final double dragDistance = dx - _startDragX;
 
     // 如果拖动距离太小，忽略这次更新
@@ -620,7 +670,7 @@ class _ExposureControlState extends State<ExposureControl> {
   // 根据点击位置计算相应的曝光值
   double _getValueFromPosition(double x) {
     final double width =
-        MediaQuery.of(context).size.width * 0.65; // 控件宽度为屏幕宽度的65%
+        MediaQuery.of(context).size.width * 0.55; // 控件宽度为屏幕宽度的55%
 
     // 计算刻度线位置
     final int tickCount = 19; // 总共19个刻度(中间±9)

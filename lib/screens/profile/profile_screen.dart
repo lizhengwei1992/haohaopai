@@ -9,6 +9,7 @@ import '../../providers/camera_provider.dart';
 import '../../login/auth_provider.dart';
 import '../../login/login_page.dart';
 import '../../screens/settings/settings_screen.dart';
+import '../../screens/camera_screen.dart'; // 导入相机界面，以访问FullScreenImage
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -20,290 +21,396 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   String nickname = "昵称";
   String? avatarPath;
+  String? backgroundImagePath;
+
+  @override
+  void initState() {
+    super.initState();
+    // 在初始化时加载用户信息
+    _loadUserInfo();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // 当依赖变化时（如Provider状态更新）重新加载信息
+    _loadUserInfo();
+  }
+
+  void _loadUserInfo() {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    if (authProvider.isLoggedIn) {
+      print(
+          "个人资料页面 - 加载用户信息: 登录类型=${authProvider.loginType}, 用户名=${authProvider.userName}");
+      setState(() {
+        nickname = authProvider.getFormattedUserName();
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF02051F),
+      backgroundColor: const Color(0xFF010417),
       body: Consumer<CameraProvider>(
         builder: (context, cameraProvider, child) {
-          // 获取拍摄次数
           final shootingCount = cameraProvider.shootingCount;
-          // 计算百分比（这里只是示意，实际计算可以后续实现）
-          final percentage = 25.0; // 假设剩余25%
+          final percentage = 25.0;
 
-          return SingleChildScrollView(
-            child: Column(
-              children: [
-                // 顶部带背景图的部分
-                _buildHeaderSection(shootingCount, percentage),
+          return Stack(
+            children: [
+              Column(
+                children: [
+                  _buildHeaderSection(shootingCount, percentage),
+                  const SizedBox(height: 10), // 添加间距，使分隔线下移
+                  Container(
+                    height: 2, // 加粗一倍
+                    margin: const EdgeInsets.symmetric(horizontal: 20.0),
+                    color: Colors.white.withOpacity(0.3),
+                  ),
+                  _buildAlbumLabel(),
+                  Expanded(
+                    child: _buildPhotoGallerySection(cameraProvider),
+                  ),
+                ],
+              ),
 
-                // 相册部分
-                _buildPhotoGallerySection(cameraProvider),
-              ],
-            ),
+              // 底部中央悬浮相机按钮
+              Positioned(
+                bottom: 50, // 将bottom值从30增加到50，使按钮向上移动
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: _buildCameraButton(),
+                ),
+              ),
+            ],
           );
         },
       ),
     );
   }
 
-  // 顶部带背景的部分
-  Widget _buildHeaderSection(int shootingCount, double percentage) {
-    // 计算设备尺寸以更好地适配
-    final screenHeight = MediaQuery.of(context).size.height;
-    final statusBarHeight = MediaQuery.of(context).padding.top;
+  // 构建相机按钮
+  Widget _buildCameraButton() {
+    return GestureDetector(
+      onTap: () {
+        // 跳转到相机界面
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => const CameraScreen(),
+          ),
+        );
+      },
+      child: Container(
+          width: 74,
+          height: 74,
+          child: Stack(children: <Widget>[
+            Positioned(
+                top: 0,
+                left: 0,
+                child: Container(
+                    width: 74,
+                    height: 74,
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: const Color.fromRGBO(254, 254, 254, 1),
+                        width: 0.5,
+                      ),
+                      gradient: const LinearGradient(
+                          begin: Alignment(6.123234262925839e-17, 1),
+                          end: Alignment(-1, 6.123234262925839e-17),
+                          colors: [
+                            Color.fromRGBO(101, 115, 237, 1),
+                            Color.fromRGBO(20, 210, 230, 1)
+                          ]),
+                      borderRadius:
+                          const BorderRadius.all(Radius.elliptical(74, 74)),
+                    ))),
+            Positioned(
+                top: 10,
+                left: 10,
+                child: Container(
+                    width: 54,
+                    height: 54,
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                          begin: Alignment(6.123234262925839e-17, 1),
+                          end: Alignment(-1, 6.123234262925839e-17),
+                          colors: [
+                            Color.fromRGBO(10, 13, 42, 1),
+                            Color.fromRGBO(69, 67, 119, 1)
+                          ]),
+                      borderRadius: BorderRadius.all(Radius.elliptical(54, 54)),
+                    ))),
+            // 相机图标
+            const Positioned(
+              top: 26,
+              left: 26,
+              child: Icon(
+                Icons.camera_alt_rounded,
+                color: Color.fromRGBO(190, 196, 252, 1),
+                size: 24,
+              ),
+            ),
+          ])),
+    );
+  }
 
-    // 动态计算header高度，但不超过屏幕的一定比例
-    final headerHeight = (screenHeight * 0.35).clamp(220.0, 280.0);
+  Widget _buildHeaderSection(int shootingCount, double percentage) {
+    final screenHeight = MediaQuery.of(context).size.height;
+    final avatarPosition = screenHeight * 0.10; // 进一步降低比例，头像位置更上移
+    final statsCardPosition = avatarPosition + 120; // 增加间距，避免重叠
+    final headerHeight = statsCardPosition + 90; // 整个头部区域高度
 
     return SizedBox(
-      height: headerHeight,
-      width: double.infinity,
+      height: headerHeight, // 整个头部区域高度
       child: Stack(
-        fit: StackFit.expand,
+        clipBehavior: Clip.none,
         children: [
-          // 背景图片
-          Image.asset(
-            'assets/images/background.jpg',
-            fit: BoxFit.cover,
+          // 背景图片 - 修改位置，使其覆盖整个上半部分
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0, // 延伸到整个头部区域底部
+            child: GestureDetector(
+              onTap: _pickBackgroundImage,
+              child: backgroundImagePath != null
+                  ? Image.file(
+                      File(backgroundImagePath!),
+                      fit: BoxFit.cover,
+                      alignment: Alignment.topCenter, // 使背景图片从顶部开始显示
+                    )
+                  : Image.asset(
+                      'assets/images/background.jpg',
+                      fit: BoxFit.cover,
+                      alignment: Alignment.topCenter, // 使背景图片从顶部开始显示
+                    ),
+            ),
           ),
 
-          // 内容层
-          Positioned.fill(
+          // 渐变遮罩 - 与背景图片相同位置
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0, // 延伸到整个头部区域底部
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withOpacity(0.3),
+                    Colors.black.withOpacity(0.7),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // 顶部操作栏 - 调整位置、大小和间距
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 10, // 加上状态栏高度
+            left: 0,
+            right: 0,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  // 移除返回按钮
+                  const Spacer(),
+                  // 消息按钮
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const MessagesScreen(),
+                        ),
+                      );
+                    },
+                    child: SvgPicture.asset(
+                      'assets/icons/messages.svg',
+                      width: 27.5, // 缩放25%
+                      height: 27.5, // 缩放25%
+                      colorFilter: const ColorFilter.mode(
+                        Colors.white,
+                        BlendMode.srcIn,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 24), // 保持间距
+                  // 设置按钮
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const SettingsScreen(),
+                        ),
+                      );
+                    },
+                    child: SvgPicture.asset(
+                      'assets/icons/setting.svg',
+                      width: 13.75, // 缩小50%（从27.5调整为13.75）
+                      height: 13.75, // 缩小50%（从27.5调整为13.75）
+                      colorFilter: const ColorFilter.mode(
+                        Colors.white,
+                        BlendMode.srcIn,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // 头像和昵称 - 位置上移
+          Positioned(
+            top: avatarPosition,
+            left: 0,
+            right: 0,
             child: Column(
               children: [
-                // 状态栏高度
-                SizedBox(height: statusBarHeight),
-
-                // 头像、昵称和设置按钮
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 24, 0),
-                  child: Row(
-                    children: [
-                      // 头像
-                      GestureDetector(
-                        onTap: _pickImage,
-                        child: Container(
-                          width: 50, // 缩小尺寸
-                          height: 50, // 缩小尺寸
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Colors.grey.withOpacity(0.5),
-                            border: Border.all(
-                                color: Colors.white.withOpacity(0.8), width: 2),
-                            image: avatarPath != null
-                                ? DecorationImage(
-                                    image: FileImage(File(avatarPath!)),
-                                    fit: BoxFit.cover,
-                                  )
-                                : null,
-                          ),
-                          child: avatarPath == null
-                              ? const Center(
-                                  child: Text(
-                                    "点击编辑",
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 8,
-                                    ),
-                                  ),
-                                )
-                              : null,
-                        ),
+                GestureDetector(
+                  onTap: _pickImage,
+                  child: Container(
+                    width: 80,
+                    height: 80,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.grey.withOpacity(0.3),
+                      border: Border.all(
+                        color: Colors.white.withOpacity(0.3),
+                        width: 1,
                       ),
-
-                      const SizedBox(width: 14),
-
-                      // 昵称
-                      GestureDetector(
-                        onTap: _editNickname,
-                        child: Text(
-                          nickname,
-                          style: const TextStyle(
-                            fontSize: 18, // 缩小字体
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-
-                      const Spacer(),
-
-                      // 设置按钮
-                      GestureDetector(
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (context) => const SettingsScreen()),
-                          );
-                        },
-                        child: SvgPicture.asset(
-                          'assets/icons/setting.svg',
-                          width: 24, // 略微缩小
-                          height: 24, // 略微缩小
-                          colorFilter: const ColorFilter.mode(
-                              Colors.white, BlendMode.srcIn),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const Spacer(),
-
-                // 余额和剩余次数显示区域
-                Container(
-                  margin: const EdgeInsets.fromLTRB(16, 0, 16, 16), // 减少顶部外边距
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 12), // 缩小内边距
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.4),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Row(
-                    children: [
-                      // 左侧显示百分比圆环 - 更立体的效果
-                      Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          SizedBox(
-                            width: 60, // 进一步缩小
-                            height: 60, // 进一步缩小
-                            child: Stack(
-                              children: [
-                                // 中心黑色圆
-                                Center(
-                                  child: Container(
-                                    width: 50, // 进一步缩小
-                                    height: 50, // 进一步缩小
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: Colors.black,
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Colors.black.withOpacity(0.5),
-                                          spreadRadius: 1,
-                                          blurRadius: 4,
-                                          offset: const Offset(0, 2),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                                // 主要进度圆环
-                                Center(
-                                  child: SizedBox(
-                                    width: 60, // 进一步缩小
-                                    height: 60, // 进一步缩小
-                                    child: CircularProgressIndicator(
-                                      value: percentage / 100,
-                                      backgroundColor:
-                                          Colors.grey.withOpacity(0.3),
-                                      valueColor:
-                                          const AlwaysStoppedAnimation<Color>(
-                                              Color(0xFF69BDFC)),
-                                      strokeWidth: 6, // 减小宽度
-                                      strokeCap: StrokeCap.round,
-                                    ),
-                                  ),
-                                ),
-                                // 内部数字显示
-                                Center(
-                                  child: Text(
-                                    "$shootingCount",
-                                    style: const TextStyle(
-                                      fontSize: 20, // 进一步缩小字体
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 4), // 减小间距
-                          // 剩余次数文字显示
-                          const Text(
-                            "剩余次数",
-                            style: TextStyle(
-                              fontSize: 10, // 缩小字体
-                              color: Colors.white70,
-                            ),
-                          ),
-                        ],
-                      ),
-
-                      // 中间的分隔线 - 加粗
-                      Container(
-                        height: 60, // 减少高度
-                        width: 2, // 加粗的分隔线
-                        margin:
-                            const EdgeInsets.symmetric(horizontal: 20), // 减少间距
-                        color: Colors.white.withOpacity(0.5),
-                      ),
-
-                      // 右侧显示账户余额和充值按钮
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min, // 确保不会超出父视图
-                          children: [
-                            const Row(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                Text(
-                                  "¥",
-                                  style: TextStyle(
-                                    fontSize: 18, // 缩小字体
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                                SizedBox(width: 4),
-                                Text(
-                                  "0.69",
-                                  style: TextStyle(
-                                    fontSize: 26, // 缩小字体
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 4), // 减小间距
-                            const Text(
-                              "账户余额",
+                      image: avatarPath != null
+                          ? DecorationImage(
+                              image: FileImage(File(avatarPath!)),
+                              fit: BoxFit.cover,
+                            )
+                          : null,
+                    ),
+                    child: avatarPath == null
+                        ? const Center(
+                            child: Text(
+                              "点击编辑",
                               style: TextStyle(
-                                fontSize: 12, // 缩小字体
-                                color: Colors.white70,
+                                color: Colors.white,
+                                fontSize: 10,
                               ),
                             ),
-                            const SizedBox(height: 10), // 减少间距
-                            SizedBox(
-                              width: double.infinity,
-                              height: 32, // 降低高度
-                              child: ElevatedButton(
-                                onPressed: () {
-                                  // 充值功能
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('充值功能即将上线')),
-                                  );
-                                },
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor:
-                                      const Color(0xFFCD923D), // 橙色按钮
-                                  foregroundColor: Colors.white,
-                                  minimumSize: const Size(100, 28), // 缩小按钮
-                                  padding: EdgeInsets.zero, // 去掉内边距
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius:
-                                        BorderRadius.circular(16), // 减小圆角
-                                  ),
-                                ),
-                                child: const Text('充值',
-                                    style: TextStyle(fontSize: 13)),
+                          )
+                        : null,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                GestureDetector(
+                  onTap: _editNickname,
+                  child: Consumer<AuthProvider>(
+                    builder: (context, authProvider, child) {
+                      print(
+                          "个人资料页面 - Consumer构建: 是否登录=${authProvider.isLoggedIn}, 用户名=${authProvider.userName}");
+                      if (authProvider.isLoggedIn) {
+                        // 使用最新的用户名并更新状态
+                        nickname = authProvider.getFormattedUserName();
+                        return Text(
+                          nickname,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.white,
+                          ),
+                        );
+                      }
+                      return Text(
+                        nickname,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.white,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // 底部统计卡片 - 位置上移
+          Positioned(
+            top: statsCardPosition, // 减少了间距，上移了位置
+            left: 20,
+            right: 20,
+            child: _buildStatsCard(shootingCount, percentage),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatsCard(int shootingCount, double percentage) {
+    return Container(
+      height: 90, // 增加高度使卡片更高一些
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.3),
+        borderRadius: BorderRadius.circular(12), // 改为稍微方正一点的圆角
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 1,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                SizedBox(
+                  width: 60, // 调整宽度
+                  height: 60, // 调整高度
+                  child: Stack(
+                    children: [
+                      Container(
+                        width: 60,
+                        height: 60,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.black.withOpacity(0.5),
+                        ),
+                      ),
+                      Center(
+                        child: SizedBox(
+                          width: 60,
+                          height: 60,
+                          child: CircularProgressIndicator(
+                            value: percentage / 100,
+                            backgroundColor: Colors.grey.withOpacity(0.2),
+                            valueColor: const AlwaysStoppedAnimation<Color>(
+                                Color(0xFF69BDFC)),
+                            strokeWidth: 4,
+                            strokeCap: StrokeCap.round,
+                          ),
+                        ),
+                      ),
+                      Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              "$shootingCount",
+                              style: const TextStyle(
+                                fontSize: 16, // 调整字体大小
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
+                            const Text(
+                              "剩余次数",
+                              style: TextStyle(
+                                fontSize: 9, // 调整字体大小
+                                color: Colors.white70,
                               ),
                             ),
                           ],
@@ -315,7 +422,99 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ],
             ),
           ),
+          Container(
+            height: 60, // 调整分隔线高度
+            width: 1,
+            color: Colors.white.withOpacity(0.3),
+          ),
+          Expanded(
+            flex: 1,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
+                    children: [
+                      Text(
+                        "¥",
+                        style: TextStyle(
+                          fontSize: 16, // 调整字体大小
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                      SizedBox(width: 2),
+                      Text(
+                        "0.69",
+                        style: TextStyle(
+                          fontSize: 24, // 调整字体大小
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Text(
+                    "账户余额",
+                    style: TextStyle(
+                      fontSize: 12, // 调整字体大小
+                      color: Colors.white70,
+                    ),
+                  ),
+                  const SizedBox(height: 8), // 增加间距
+                  SizedBox(
+                    height: 28, // 调整按钮高度
+                    width: 80, // 调整按钮宽度
+                    child: ElevatedButton(
+                      onPressed: () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('充值功能即将上线')),
+                        );
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFCD923D),
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        padding: EdgeInsets.zero,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(6), // 调整为方一点的圆角
+                        ),
+                      ),
+                      child: const Text(
+                        '充值',
+                        style: TextStyle(fontSize: 14), // 调整字体大小
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
+      ),
+    );
+  }
+
+  // 相册标签
+  Widget _buildAlbumLabel() {
+    return const Padding(
+      padding: EdgeInsets.fromLTRB(20, 10, 20, 6), // 减少上下边距
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Text(
+          "相册",
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+        ),
       ),
     );
   }
@@ -324,82 +523,53 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildPhotoGallerySection(CameraProvider cameraProvider) {
     final recentPhotos = cameraProvider.recentPhotos;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Padding(
-          padding: EdgeInsets.fromLTRB(16, 16, 16, 10),
-          child: Text(
-            "相册",
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
+    if (recentPhotos.isEmpty) {
+      return Container(
+        height: 200,
+        alignment: Alignment.center,
+        child: const Text(
+          "暂无照片",
+          style: TextStyle(color: Colors.white70),
         ),
-        recentPhotos.isEmpty
-            ? Container(
-                height: 200,
-                alignment: Alignment.center,
-                child: const Text(
-                  "暂无照片",
-                  style: TextStyle(color: Colors.white70),
-                ),
-              )
-            : GridView.count(
-                physics: const NeverScrollableScrollPhysics(),
-                shrinkWrap: true,
-                crossAxisCount: 3,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                mainAxisSpacing: 8,
-                crossAxisSpacing: 8,
-                children: recentPhotos.map((photo) {
-                  return _buildPhotoItem(photo.path);
-                }).toList(),
-              ),
-        const SizedBox(height: 20), // 底部留白
-      ],
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: GridView.builder(
+        physics: const BouncingScrollPhysics(),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 3,
+          mainAxisSpacing: 8,
+          crossAxisSpacing: 8,
+          childAspectRatio: 1,
+        ),
+        itemCount: recentPhotos.length,
+        itemBuilder: (context, index) {
+          return _buildPhotoItem(recentPhotos[index].path);
+        },
+      ),
     );
   }
 
   // 照片项
   Widget _buildPhotoItem(String photoPath) {
-    return Stack(
-      children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: Image.file(
-            File(photoPath),
-            fit: BoxFit.cover,
-            width: double.infinity,
-            height: double.infinity,
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => FullScreenImage(imagePath: photoPath),
           ),
+        );
+      },
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.file(
+          File(photoPath),
+          fit: BoxFit.cover,
         ),
-        Positioned(
-          top: 4,
-          right: 4,
-          child: Container(
-            width: 24,
-            height: 24,
-            decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.6),
-              shape: BoxShape.circle,
-            ),
-            child: IconButton(
-              padding: EdgeInsets.zero,
-              icon: const Icon(
-                Icons.more_horiz,
-                size: 16,
-                color: Colors.white,
-              ),
-              onPressed: () {
-                // 显示更多选项
-              },
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 
@@ -417,41 +587,104 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   // 编辑昵称
   void _editNickname() {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    if (!authProvider.isLoggedIn) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先登录后再修改昵称')),
+      );
+      return;
+    }
+
+    // 获取当前昵称作为初始值
+    String newNickname = authProvider.getFormattedUserName();
+
+    // 显示修改昵称对话框
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF02051F),
-        title: const Text('编辑昵称', style: TextStyle(color: Colors.white)),
+        title: const Text('修改昵称'),
         content: TextField(
-          style: const TextStyle(color: Colors.white),
           decoration: const InputDecoration(
-            hintText: '输入昵称',
-            hintStyle: TextStyle(color: Colors.white70),
-            enabledBorder: UnderlineInputBorder(
-              borderSide: BorderSide(color: Colors.white70),
-            ),
-            focusedBorder: UnderlineInputBorder(
-              borderSide: BorderSide(color: Colors.blue),
-            ),
+            hintText: '请输入新昵称',
           ),
           onChanged: (value) {
-            setState(() {
-              nickname = value.isEmpty ? '昵称' : value;
-            });
+            newNickname = value.trim();
           },
+          controller: TextEditingController(text: newNickname),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('取消', style: TextStyle(color: Colors.white70)),
+            child: const Text('取消'),
           ),
           TextButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(context);
+              if (newNickname.isNotEmpty) {
+                // 使用AuthProvider更新昵称
+                await authProvider.updateUserName(newNickname);
+
+                // 更新UI显示
+                setState(() {
+                  nickname = newNickname;
+                });
+
+                // 显示成功提示
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('昵称修改成功')),
+                  );
+                }
+              }
             },
-            child: const Text('确定', style: TextStyle(color: Colors.blue)),
+            child: const Text('确定'),
           ),
         ],
+      ),
+    );
+  }
+
+  // 选择背景图片
+  Future<void> _pickBackgroundImage() async {
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+
+    if (pickedFile != null) {
+      setState(() {
+        backgroundImagePath = pickedFile.path;
+      });
+    }
+  }
+}
+
+// 消息列表页面
+class MessagesScreen extends StatelessWidget {
+  const MessagesScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF010417),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: const Text(
+          '消息中心',
+          style: TextStyle(color: Colors.white),
+        ),
+      ),
+      body: Center(
+        child: Text(
+          '暂无消息',
+          style: TextStyle(
+            color: Colors.white60,
+            fontSize: 16,
+          ),
+        ),
       ),
     );
   }

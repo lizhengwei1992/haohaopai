@@ -25,6 +25,7 @@ import '../widgets/camera/shooting_tips_animation.dart';
 import 'dart:async';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 class CameraScreen extends StatefulWidget {
   const CameraScreen({super.key});
@@ -270,7 +271,7 @@ class _CameraScreenState extends State<CameraScreen>
       await _switchToCamera(cameraIndex);
 
       // 恢复保存的相机设置
-      if (_controller != null && _controller!.value.isInitialized) {
+      if (mounted && _controller != null && _controller!.value.isInitialized) {
         // 恢复闪光灯状态
         if (_wasFlashOn) {
           await _toggleFlash();
@@ -566,6 +567,28 @@ class _CameraScreenState extends State<CameraScreen>
     }
   }
 
+  // 用于构建相机预览的方法，增加额外防护
+  Widget _buildCameraPreview() {
+    if (!mounted || _controller == null || !_controller!.value.isInitialized) {
+      return Container(
+        color: Colors.black,
+        child: const Center(
+          child: CircularProgressIndicator(
+            color: Colors.white,
+          ),
+        ),
+      );
+    }
+
+    try {
+      return CameraPreview(_controller!);
+    } catch (e) {
+      debugPrint('构建相机预览错误: $e');
+      // 出错时返回黑屏，避免应用崩溃
+      return Container(color: Colors.black);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (!_isInitialized || _controller == null) {
@@ -810,8 +833,8 @@ class _CameraScreenState extends State<CameraScreen>
                                                     sigmaX: 0, // 移除模糊效果，始终为0
                                                     sigmaY: 0, // 移除模糊效果，始终为0
                                                   ),
-                                                  child: CameraPreview(
-                                                      _controller!),
+                                                  child:
+                                                      _buildCameraPreview(), // 使用安全的预览构建方法
                                                 ),
                                               ),
                                             ),
@@ -875,24 +898,21 @@ class _CameraScreenState extends State<CameraScreen>
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        // 个人中心按钮
+                        // 左上角添加返回按钮
                         GestureDetector(
                           onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => const ProfileScreen(),
-                              ),
-                            );
+                            // 返回到个人资料页面（主页面）
+                            Navigator.of(context).pop();
                           },
-                          child: const PersonIcon(),
+                          child: const Icon(
+                            Icons.arrow_back_ios,
+                            color: Colors.white,
+                            size: 24,
+                          ),
                         ),
 
-                        // 相机翻转按钮（替换原来的设置按钮）
-                        GestureDetector(
-                          onTap: _switchCamera,
-                          child: const CameraFlipIcon(), // 直接使用图标，移除底部圆形区域
-                        ),
+                        // 右侧空白占位，移除了相机翻转按钮
+                        const SizedBox(width: 24),
                       ],
                     ),
                   ),
@@ -961,29 +981,36 @@ class _CameraScreenState extends State<CameraScreen>
           // 滤镜选择器 - 单独放在外层Stack中，使其能够接收点击事件
           if (_showFilterSelector)
             Positioned(
-              bottom: 120, // 从105调整到120，确保不与拍摄按钮重叠
+              // 计算位置，使其与底部控制按钮上边缘对齐
+              top: defaultPreviewBottom + 10, // 与底部操作栏的顶部位置相同
               left: 0,
               right: 0,
               child: FilterSelector(
                 currentFilter: _currentFilter,
                 onFilterChanged: _handleFilterChange,
-                // 使用实时相机预览而不是静态图片
+                // 使用安全的相机预览构建方法
                 cameraPreviewWidget:
                     _controller != null && _controller!.value.isInitialized
                         ? SizedBox(
-                            width: 50,
-                            height: 50,
+                            width: 60, // 增加预览宽度从50到60
+                            height: 60 / targetAspectRatio, // 保持与相机预览相同的宽高比
                             child: FittedBox(
                               fit: BoxFit.cover,
                               child: SizedBox(
                                 width: MediaQuery.of(context).size.width,
                                 height: MediaQuery.of(context).size.width *
-                                    cameraAspectRatio,
-                                child: CameraPreview(_controller!),
+                                    _controller!.value.aspectRatio,
+                                child: ClipRect(
+                                  child: _buildCameraPreview(), // 使用安全的预览构建方法
+                                ),
                               ),
                             ),
                           )
-                        : null,
+                        : Container(
+                            width: 60, // 增加预览宽度从50到60
+                            height: 60 / targetAspectRatio, // 保持与相机预览相同的宽高比
+                            color: Colors.black,
+                          ),
               ),
             ),
         ],
@@ -1050,26 +1077,26 @@ class _CameraScreenState extends State<CameraScreen>
           await _saveAsPng(originalPath, _currentAspectRatio);
       debugPrint('照片已处理并保存: $pngPath');
 
-      // 自动保存到相册
+      // 自动保存到相册 - saveToGallery会自动将照片添加到recentPhotos列表
       try {
         await cameraProvider.saveToGallery(pngPath);
+        debugPrint('照片已保存到相册并添加到最近列表');
       } catch (e) {
         debugPrint('保存照片到相册出错: $e');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('保存失败')),
           );
+
+          // 如果保存到相册失败，仍然需要添加到最近列表
+          final metadata = PhotoMetadata(
+            path: pngPath,
+            timestamp: DateTime.now(),
+            isFromApp: true,
+          );
+          cameraProvider.addPhotoToRecentList(metadata);
         }
       }
-
-      // 将照片添加到最近照片列表
-      final metadata = PhotoMetadata(
-        path: pngPath,
-        timestamp: DateTime.now(),
-        isFromApp: true,
-      );
-
-      cameraProvider.addPhotoToRecentList(metadata);
 
       // 重置拍摄状态
       cameraProvider.reset();

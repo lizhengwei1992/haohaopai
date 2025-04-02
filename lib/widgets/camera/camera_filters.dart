@@ -345,12 +345,14 @@ class _FilterSelectorState extends State<FilterSelector> {
       // 空的onTap回调，确保点击事件被消费
       onTap: () {},
       child: Container(
-        height: 65, // 更紧凑的高度
-        color: Colors.black.withOpacity(0.5),
+        height: 80, // 增加高度，使预览图更大
+        color: Colors.black.withOpacity(0.6), // 增加不透明度，使背景更深
+        padding: const EdgeInsets.symmetric(vertical: 5), // 添加上下内边距
         child: ListView.builder(
           controller: _scrollController,
           scrollDirection: Axis.horizontal,
           itemCount: FilterType.values.length,
+          padding: const EdgeInsets.symmetric(horizontal: 10), // 添加水平内边距
           itemBuilder: (context, index) {
             final filterType = FilterType.values[index];
             final isSelected = filterType == widget.currentFilter;
@@ -358,9 +360,8 @@ class _FilterSelectorState extends State<FilterSelector> {
             return GestureDetector(
               onTap: () => widget.onFilterChanged(filterType),
               child: Container(
-                width: 58, // 略微减小宽度
-                margin: const EdgeInsets.symmetric(
-                    horizontal: 3, vertical: 6), // 减小边距
+                width: 62, // 略微增加宽度
+                margin: const EdgeInsets.symmetric(horizontal: 4), // 调整水平边距
                 decoration: BoxDecoration(
                   border: Border.all(
                     color: isSelected ? Colors.yellow : Colors.transparent,
@@ -369,10 +370,10 @@ class _FilterSelectorState extends State<FilterSelector> {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
+                    // 增加预览图占比
                     Expanded(
-                      flex: 3, // 设置比例为3
+                      flex: 4, // 从3增加到4，使预览图更大
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(6),
                         child: FilterPreviewThumbnail(
@@ -381,14 +382,15 @@ class _FilterSelectorState extends State<FilterSelector> {
                         ),
                       ),
                     ),
+                    // 文本区域
                     Expanded(
-                      flex: 2, // 设置比例为2，文字部分的比例更高
+                      flex: 1, // 从2减少到1，压缩文字区域
                       child: Center(
                         child: Text(
                           CameraFilters.getFilterName(filterType),
                           style: TextStyle(
                             color: isSelected ? Colors.yellow : Colors.white,
-                            fontSize: 10,
+                            fontSize: 11, // 略微增加字体大小
                             fontWeight: isSelected
                                 ? FontWeight.bold
                                 : FontWeight.normal,

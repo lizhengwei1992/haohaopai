@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:haohaopai/login/phone_login_page.dart';
+import 'package:provider/provider.dart';
+import 'package:haohaopai/login/auth_provider.dart';
+import 'package:haohaopai/screens/camera_screen.dart';
+import 'package:haohaopai/screens/profile/profile_screen.dart';
 
 class LoginPage extends StatelessWidget {
   const LoginPage({Key? key}) : super(key: key);
@@ -21,7 +25,7 @@ class LoginPage extends StatelessWidget {
               children: [
                 // 将整个屏幕分为上中下三部分
                 const Spacer(),
-                
+
                 // 标题居中
                 Center(
                   child: Column(
@@ -45,9 +49,9 @@ class LoginPage extends StatelessWidget {
                     ],
                   ),
                 ),
-                
+
                 const Spacer(),
-                
+
                 // 底部登录部分
                 Column(
                   children: [
@@ -72,7 +76,8 @@ class LoginPage extends StatelessWidget {
                             ),
                             padding: const EdgeInsets.symmetric(vertical: 15),
                           ),
-                          child: const Text('登录', style: TextStyle(fontSize: 16)),
+                          child:
+                              const Text('登录', style: TextStyle(fontSize: 16)),
                         ),
                       ),
                     ),
@@ -97,17 +102,41 @@ class LoginPage extends StatelessWidget {
                               color: Color(0xFF07C160),
                               shape: BoxShape.circle,
                             ),
-                            child: const Icon(Icons.wechat, color: Colors.white),
+                            child:
+                                const Icon(Icons.wechat, color: Colors.white),
                           ),
                         ),
                         const SizedBox(width: 30),
                         // Apple登录 - 颜色反转
                         InkWell(
-                          onTap: () {
-                            // Apple登录逻辑（暂不实现）
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Apple登录功能暂未实现')),
-                            );
+                          onTap: () async {
+                            final authProvider = Provider.of<AuthProvider>(
+                                context,
+                                listen: false);
+                            final success =
+                                await authProvider.loginWithThirdParty('apple');
+
+                            if (success) {
+                              print('Apple登录成功: 用户名=${authProvider.userName}');
+
+                              // 登录成功，导航到个人资料界面并清除导航栈
+                              if (context.mounted) {
+                                Navigator.of(context).pushAndRemoveUntil(
+                                  MaterialPageRoute(
+                                      builder: (context) =>
+                                          const ProfileScreen()),
+                                  (route) => false,
+                                );
+                              }
+                            } else {
+                              // 登录失败，显示提示
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                      content: Text('Apple登录失败，请重试')),
+                                );
+                              }
+                            }
                           },
                           child: Container(
                             width: 44,
