@@ -1,25 +1,33 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-import 'screens/camera_screen.dart';
-import 'screens/profile/profile_screen.dart';
-import 'screens/settings/settings_screen.dart';
-import 'providers/camera_provider.dart';
-import 'providers/settings_provider.dart';
-import 'utils/app_theme.dart';
+import 'camera/native_camera_service.dart';
+import 'camera/camera_screen.dart';
+import 'home/home.dart';
+import 'home/settings_screen.dart';
 import 'login/auth_provider.dart';
 import 'login/login_page.dart';
+import 'utils/app_theme.dart';
 
 Future<void> main() async {
+  // 确保Flutter绑定初始化
   WidgetsFlutterBinding.ensureInitialized();
 
+  // 设置页面方向
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
   ]);
 
+  // 如果是iOS平台，提前初始化相机服务
+  if (Platform.isIOS) {
+    await NativeCameraService.instance.initializeCamera();
+  }
+
+  // 请求相机权限
   final cameraStatus = await Permission.camera.request();
   if (cameraStatus.isDenied) {
     debugPrint('相机权限被拒绝');
@@ -28,8 +36,6 @@ Future<void> main() async {
   runApp(
     MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => CameraProvider()),
-        ChangeNotifierProvider(create: (_) => SettingsProvider()),
         ChangeNotifierProvider(create: (_) => AuthProvider()),
       ],
       child: const MyApp(),
@@ -38,7 +44,7 @@ Future<void> main() async {
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  const MyApp({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -57,7 +63,7 @@ class MyApp extends StatelessWidget {
       home: const SplashScreen(),
       routes: {
         '/camera': (context) => const CameraScreen(),
-        '/profile': (context) => const ProfileScreen(),
+        '/home': (context) => const ProfileScreen(),
         '/settings': (context) => const SettingsScreen(),
         '/login': (context) => const LoginPage(),
       },
@@ -67,7 +73,7 @@ class MyApp extends StatelessWidget {
 
 // 启动页面，检查登录状态
 class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
+  const SplashScreen({Key? key}) : super(key: key);
 
   @override
   State<SplashScreen> createState() => _SplashScreenState();
@@ -88,7 +94,7 @@ class _SplashScreenState extends State<SplashScreen> {
 
     // 根据登录状态跳转到不同页面
     if (authProvider.isLoggedIn) {
-      // 如果已登录，跳转到个人资料界面
+      // 如果已登录，跳转到主页
       if (mounted) {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (context) => const ProfileScreen()),

@@ -3,13 +3,11 @@ import 'package:provider/provider.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter_svg/flutter_svg.dart';
-import '../../providers/settings_provider.dart';
-import '../../utils/app_theme.dart';
-import '../../providers/camera_provider.dart';
-import '../../login/auth_provider.dart';
-import '../../login/login_page.dart';
-import '../../screens/settings/settings_screen.dart';
-import '../../screens/camera_screen.dart'; // 导入相机界面，以访问FullScreenImage
+import '../utils/settings_provider.dart';
+import '../login/auth_provider.dart';
+import 'settings_screen.dart';
+import '../camera/camera_screen.dart';
+import 'messages_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -52,41 +50,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF010417),
-      body: Consumer<CameraProvider>(
-        builder: (context, cameraProvider, child) {
-          final shootingCount = cameraProvider.shootingCount;
-          final percentage = 25.0;
-
-          return Stack(
+      body: Stack(
+        children: [
+          Column(
             children: [
-              Column(
-                children: [
-                  _buildHeaderSection(shootingCount, percentage),
-                  const SizedBox(height: 10), // 添加间距，使分隔线下移
-                  Container(
-                    height: 2, // 加粗一倍
-                    margin: const EdgeInsets.symmetric(horizontal: 20.0),
-                    color: Colors.white.withOpacity(0.3),
-                  ),
-                  _buildAlbumLabel(),
-                  Expanded(
-                    child: _buildPhotoGallerySection(cameraProvider),
-                  ),
-                ],
+              _buildHeaderSection(),
+              const SizedBox(height: 10), // 添加间距，使分隔线下移
+              Container(
+                height: 2, // 加粗一倍
+                margin: const EdgeInsets.symmetric(horizontal: 20.0),
+                color: Colors.white.withOpacity(0.3),
               ),
-
-              // 底部中央悬浮相机按钮
-              Positioned(
-                bottom: 50, // 将bottom值从30增加到50，使按钮向上移动
-                left: 0,
-                right: 0,
+              _buildAlbumLabel(),
+              Expanded(
                 child: Center(
-                  child: _buildCameraButton(),
+                  child: Text(
+                    "相册功能(TODO)",
+                    style: TextStyle(color: Colors.white.withOpacity(0.7)),
+                  ),
                 ),
               ),
             ],
-          );
-        },
+          ),
+
+          // 底部中央悬浮相机按钮
+          Positioned(
+            bottom: 50, // 将bottom值从30增加到50，使按钮向上移动
+            left: 0,
+            right: 0,
+            child: Center(
+              child: _buildCameraButton(),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -94,7 +90,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // 构建相机按钮
   Widget _buildCameraButton() {
     return GestureDetector(
-      onTap: () {
+      onTap: () async {
         // 跳转到相机界面
         Navigator.push(
           context,
@@ -158,7 +154,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildHeaderSection(int shootingCount, double percentage) {
+  Widget _buildHeaderSection() {
     final screenHeight = MediaQuery.of(context).size.height;
     final avatarPosition = screenHeight * 0.10; // 进一步降低比例，头像位置更上移
     final statsCardPosition = avatarPosition + 120; // 增加间距，避免重叠
@@ -276,7 +272,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Column(
               children: [
                 GestureDetector(
-                  onTap: _pickImage,
+                  onTap: _pickAvatar,
                   child: Container(
                     width: 80,
                     height: 80,
@@ -346,14 +342,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
             top: statsCardPosition, // 减少了间距，上移了位置
             left: 20,
             right: 20,
-            child: _buildStatsCard(shootingCount, percentage),
+            child: _buildStatsCard(),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildStatsCard(int shootingCount, double percentage) {
+  // 相册标签
+  Widget _buildAlbumLabel() {
+    return const Padding(
+      padding: EdgeInsets.fromLTRB(20, 10, 20, 6), // 减少上下边距
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Text(
+          "相册",
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+        ),
+      ),
+    );
+  }
+
+  // 账户余额卡片
+  Widget _buildStatsCard() {
     return Container(
       height: 90, // 增加高度使卡片更高一些
       decoration: BoxDecoration(
@@ -385,7 +400,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           width: 60,
                           height: 60,
                           child: CircularProgressIndicator(
-                            value: percentage / 100,
+                            value: 25.0 / 100,
                             backgroundColor: Colors.grey.withOpacity(0.2),
                             valueColor: const AlwaysStoppedAnimation<Color>(
                                 Color(0xFF69BDFC)),
@@ -397,16 +412,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       Center(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
+                          children: const [
                             Text(
-                              "$shootingCount",
-                              style: const TextStyle(
+                              "0",
+                              style: TextStyle(
                                 fontSize: 16, // 调整字体大小
                                 fontWeight: FontWeight.bold,
                                 color: Colors.white,
                               ),
                             ),
-                            const Text(
+                            Text(
                               "剩余次数",
                               style: TextStyle(
                                 fontSize: 9, // 调整字体大小
@@ -501,86 +516,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // 相册标签
-  Widget _buildAlbumLabel() {
-    return const Padding(
-      padding: EdgeInsets.fromLTRB(20, 10, 20, 6), // 减少上下边距
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: Text(
-          "相册",
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-          ),
-        ),
-      ),
-    );
-  }
+  // 选择头像
+  Future<void> _pickAvatar() async {
+    final ImagePicker picker = ImagePicker();
+    final XFile? image = await picker.pickImage(source: ImageSource.gallery);
 
-  // 相册部分
-  Widget _buildPhotoGallerySection(CameraProvider cameraProvider) {
-    final recentPhotos = cameraProvider.recentPhotos;
-
-    if (recentPhotos.isEmpty) {
-      return Container(
-        height: 200,
-        alignment: Alignment.center,
-        child: const Text(
-          "暂无照片",
-          style: TextStyle(color: Colors.white70),
-        ),
-      );
-    }
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: GridView.builder(
-        physics: const BouncingScrollPhysics(),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 3,
-          mainAxisSpacing: 8,
-          crossAxisSpacing: 8,
-          childAspectRatio: 1,
-        ),
-        itemCount: recentPhotos.length,
-        itemBuilder: (context, index) {
-          return _buildPhotoItem(recentPhotos[index].path);
-        },
-      ),
-    );
-  }
-
-  // 照片项
-  Widget _buildPhotoItem(String photoPath) {
-    return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => FullScreenImage(imagePath: photoPath),
-          ),
-        );
-      },
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Image.file(
-          File(photoPath),
-          fit: BoxFit.cover,
-        ),
-      ),
-    );
-  }
-
-  // 选择头像图片
-  Future<void> _pickImage() async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-
-    if (pickedFile != null) {
+    if (image != null) {
       setState(() {
-        avatarPath = pickedFile.path;
+        avatarPath = image.path;
       });
     }
   }
@@ -646,46 +589,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   // 选择背景图片
   Future<void> _pickBackgroundImage() async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+    final ImagePicker picker = ImagePicker();
+    final XFile? image = await picker.pickImage(source: ImageSource.gallery);
 
-    if (pickedFile != null) {
+    if (image != null) {
       setState(() {
-        backgroundImagePath = pickedFile.path;
+        backgroundImagePath = image.path;
       });
     }
-  }
-}
-
-// 消息列表页面
-class MessagesScreen extends StatelessWidget {
-  const MessagesScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF010417),
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text(
-          '消息中心',
-          style: TextStyle(color: Colors.white),
-        ),
-      ),
-      body: Center(
-        child: Text(
-          '暂无消息',
-          style: TextStyle(
-            color: Colors.white60,
-            fontSize: 16,
-          ),
-        ),
-      ),
-    );
   }
 }

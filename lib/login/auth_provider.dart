@@ -5,13 +5,11 @@ import 'dart:math';
 
 class AuthProvider extends ChangeNotifier {
   bool _isLoggedIn = false;
-  String? _phoneNumber;
   String? _userName;
-  String? _loginType; // "phone", "apple"
+  String? _loginType; // "apple"
   String? _userIdentifier; // 用于保存用户唯一标识
 
   bool get isLoggedIn => _isLoggedIn;
-  String? get phoneNumber => _phoneNumber;
   String? get userName => _userName;
   String? get loginType => _loginType;
   String? get userIdentifier => _userIdentifier;
@@ -55,7 +53,6 @@ class AuthProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
 
     _isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
-    _phoneNumber = prefs.getString('phoneNumber');
     _userName = prefs.getString('userName');
     _loginType = prefs.getString('loginType');
     _userIdentifier = prefs.getString('userIdentifier');
@@ -68,10 +65,6 @@ class AuthProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
 
     await prefs.setBool('isLoggedIn', _isLoggedIn);
-
-    if (_phoneNumber != null) {
-      await prefs.setString('phoneNumber', _phoneNumber!);
-    }
 
     if (_userName != null) {
       await prefs.setString('userName', _userName!);
@@ -90,7 +83,6 @@ class AuthProvider extends ChangeNotifier {
   Future<void> clearLoginState() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('isLoggedIn');
-    await prefs.remove('phoneNumber');
     await prefs.remove('userName');
     await prefs.remove('loginType');
     await prefs.remove('userIdentifier');
@@ -122,27 +114,6 @@ class AuthProvider extends ChangeNotifier {
     await saveLoginState();
 
     notifyListeners();
-  }
-
-  // 使用手机号和验证码登录
-  Future<bool> loginWithPhone(String phone, String code) async {
-    // 模拟登录验证 - 实际应用中应该调用API
-    if (phone == '17364538218' && code == '123456') {
-      _isLoggedIn = true;
-      _phoneNumber = phone;
-      _loginType = "phone";
-      _userIdentifier = "phone_$phone";
-
-      // 为用户获取或生成昵称
-      _userName = await _getUserNickname(_userIdentifier!);
-
-      // 保存登录状态
-      await saveLoginState();
-
-      notifyListeners();
-      return true;
-    }
-    return false;
   }
 
   // 使用Apple账号登录
@@ -180,14 +151,12 @@ class AuthProvider extends ChangeNotifier {
     if (provider == 'apple') {
       return await loginWithApple();
     }
-    // 其他第三方登录方式
     return false;
   }
 
   // 登出
   Future<void> logout() async {
     _isLoggedIn = false;
-    _phoneNumber = null;
     _userName = null;
     _loginType = null;
     _userIdentifier = null;
