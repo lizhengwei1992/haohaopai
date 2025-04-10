@@ -414,9 +414,14 @@ class CameraControlWidgets {
 
   // 构建曝光图标
   Widget _buildExposureIcon() {
-    return CustomPaint(
-      size: const Size(22, 22),
-      painter: ExposureIconPainter(),
+    return SvgPicture.asset(
+      'assets/icons/exposure.svg',
+      width: 24,
+      height: 24,
+      colorFilter: const ColorFilter.mode(
+        Colors.white,
+        BlendMode.srcIn,
+      ),
     );
   }
 

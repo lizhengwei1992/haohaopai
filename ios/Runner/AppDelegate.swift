@@ -38,6 +38,8 @@ import AVFoundation
             self.getCameraCapabilities(result: result)
         case "initializeCamera":
             CameraSingleton.shared.initializeCamera(result: result)
+        case "isCameraReady":
+            CameraSingleton.shared.isCameraReady(result)
         case "pauseCamera":
             CameraSingleton.shared.pausePreview()
             result(nil)
@@ -51,6 +53,14 @@ import AVFoundation
     
     // 预热相机权限，提高相机启动速度
     self.preheatCameraPermission()
+    
+    // 延迟初始化相机服务，避免阻塞App启动
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+        NSLog("开始后台初始化相机服务...")
+        CameraSingleton.shared.initializeCamera { success in
+            NSLog("相机服务初始化结果: \(success)")
+        }
+    }
     
     GeneratedPluginRegistrant.register(with: self)
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)

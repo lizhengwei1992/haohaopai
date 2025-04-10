@@ -84,12 +84,15 @@ class NativeCameraView: NSObject, FlutterPlatformView, FlutterStreamHandler {
         print("NativeCameraView: 事件通道连接成功, viewId=\(viewId)")
         print("NativeCameraView: 事件通道名称=com.haohaopai.app/native_camera_events_\(viewId)")
         
-        // 立即发送初始化事件确认连接成功
-        let initialEvent: [String: Any] = [
-            "type": "initialized",
-            "message": "相机事件通道已连接"
-        ]
-        events(initialEvent)
+        // 使用延迟确保Flutter端有足够时间处理事件流设置
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            // 立即发送初始化事件确认连接成功
+            let initialEvent: [String: Any] = [
+                "type": "initialized",
+                "message": "相机事件通道已连接"
+            ]
+            events(initialEvent)
+        }
         
         return nil
     }

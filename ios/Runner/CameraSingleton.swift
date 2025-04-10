@@ -16,6 +16,9 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     private var isRunning = false
     var currentPosition: AVCaptureDevice.Position = .back
     
+    // 初始化完成回调列表
+    private var initializationCompletionHandlers: [(Bool) -> Void] = []
+    
     // 当前激活的设备
     private var currentDevice: AVCaptureDevice?
     private var currentDeviceInput: AVCaptureDeviceInput?
@@ -39,6 +42,20 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     }
     
     // MARK: - 公共方法
+    
+    /// 检查相机是否已准备就绪
+    func isCameraReady(_ result: FlutterResult) {
+        result(isInitialized)
+    }
+    
+    /// 等待相机初始化完成
+    func waitForInitialization(completion: @escaping (Bool) -> Void) {
+        if isInitialized {
+            completion(true)
+        } else {
+            initializationCompletionHandlers.append(completion)
+        }
+    }
     
     /// 初始化相机
     func initializeCamera(result: @escaping FlutterResult) {
@@ -71,6 +88,7 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                 result(FlutterError(code: "PERMISSION_DENIED", 
                                    message: "相机权限被拒绝", 
                                    details: nil))
+                self.notifyInitializationCompleted(success: false)
                 return
             }
             
@@ -82,17 +100,29 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                     
                     // 在主线程返回结果
                     DispatchQueue.main.async {
+                        self.notifyInitializationCompleted(success: true)
                         result(true)
                     }
                 } catch {
                     // 在主线程返回错误
                     DispatchQueue.main.async {
+                        self.notifyInitializationCompleted(success: false)
                         result(FlutterError(code: "SETUP_ERROR", 
                                            message: "设置相机失败: \(error.localizedDescription)", 
                                            details: nil))
                     }
                 }
             }
+        }
+    }
+    
+    /// 通知所有等待的处理器初始化已完成
+    private func notifyInitializationCompleted(success: Bool) {
+        let handlers = initializationCompletionHandlers
+        initializationCompletionHandlers = []
+        
+        for handler in handlers {
+            handler(success)
         }
     }
     
@@ -149,7 +179,23 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     
     /// 设置事件接收器
     func setEventSink(_ newEventSink: FlutterEventSink?) {
-        eventSink = newEventSink
+        // 在主线程中设置事件接收器
+        DispatchQueue.main.async {
+            self.eventSink = newEventSink
+            
+            // 如果设置了新的事件接收器，发送一个测试事件确认通道工作正常
+            if let sink = newEventSink {
+                // 延迟发送，确保接收器已准备好
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    let testEvent: [String: Any] = [
+                        "type": "channelTest",
+                        "message": "事件通道测试",
+                        "timestamp": Date().timeIntervalSince1970
+                    ]
+                    sink(testEvent)
+                }
+            }
+        }
     }
     
     /// 获取预览层

@@ -22,17 +22,13 @@ Future<void> main() async {
     DeviceOrientation.portraitDown,
   ]);
 
-  // 如果是iOS平台，提前初始化相机服务
-  if (Platform.isIOS) {
-    await NativeCameraService.instance.initializeCamera();
-  }
-
   // 请求相机权限
   final cameraStatus = await Permission.camera.request();
   if (cameraStatus.isDenied) {
     debugPrint('相机权限被拒绝');
   }
 
+  // 启动应用
   runApp(
     MultiProvider(
       providers: [
@@ -41,6 +37,20 @@ Future<void> main() async {
       child: const MyApp(),
     ),
   );
+
+  // 在应用启动后的后台初始化相机，不阻塞UI
+  if (Platform.isIOS) {
+    // 使用微任务确保它不会阻塞主UI线程，但会在当前帧结束后立即执行
+    Future.microtask(() async {
+      try {
+        debugPrint('开始在后台初始化相机...');
+        final success = await NativeCameraService.instance.initializeCamera();
+        debugPrint('相机初始化${success ? '成功' : '失败'}');
+      } catch (e) {
+        debugPrint('相机初始化出错: $e');
+      }
+    });
+  }
 }
 
 class MyApp extends StatelessWidget {

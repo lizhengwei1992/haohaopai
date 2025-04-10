@@ -7,6 +7,7 @@ import '../utils/settings_provider.dart';
 import '../login/auth_provider.dart';
 import 'settings_screen.dart';
 import '../camera/camera_screen.dart';
+import '../camera/native_camera_service.dart';
 import 'messages_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -91,13 +92,52 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildCameraButton() {
     return GestureDetector(
       onTap: () async {
-        // 跳转到相机界面
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => const CameraScreen(),
-          ),
-        );
+        // 检查相机是否已准备好
+        bool isReady = await NativeCameraService.instance.isCameraReady();
+
+        if (!isReady) {
+          // 显示加载对话框
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (BuildContext context) {
+              return Dialog(
+                backgroundColor: Colors.transparent,
+                elevation: 0,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(
+                      valueColor:
+                          AlwaysStoppedAnimation<Color>(Colors.blue.shade300),
+                    ),
+                    const SizedBox(height: 20),
+                    const Text(
+                      '正在准备相机...',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ],
+                ),
+              );
+            },
+          );
+
+          // 等待相机初始化完成
+          await NativeCameraService.instance.waitForInitialization();
+
+          // 关闭加载对话框
+          Navigator.of(context).pop();
+        }
+
+        // 确保初始化完成后再跳转到相机界面
+        if (mounted) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const CameraScreen(),
+            ),
+          );
+        }
       },
       child: Container(
           width: 74,

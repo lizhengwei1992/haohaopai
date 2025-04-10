@@ -10,6 +10,12 @@ class NativeCameraService {
   static const MethodChannel _channel =
       MethodChannel('com.haohaopai.app/native_camera');
 
+  // 初始化完成的Completer
+  final Completer<bool> _initializationCompleter = Completer<bool>();
+
+  // 是否已初始化
+  bool _isInitialized = false;
+
   // 私有构造函数确保单例模式
   NativeCameraService._();
 
@@ -43,15 +49,59 @@ class NativeCameraService {
     }
   }
 
+  /// 检查相机是否已准备就绪
+  Future<bool> isCameraReady() async {
+    if (!Platform.isIOS) return false;
+
+    // 如果已经完成了初始化，直接返回true
+    if (_isInitialized) return true;
+
+    try {
+      // 查询原生端相机状态
+      final bool isReady = await _channel.invokeMethod('isCameraReady');
+      return isReady;
+    } on PlatformException catch (e) {
+      debugPrint('检查相机状态时出错: ${e.message}');
+      return false;
+    }
+  }
+
+  /// 等待相机初始化完成
+  Future<bool> waitForInitialization() async {
+    if (_isInitialized) return true;
+
+    // 如果初始化器还未完成，等待结果
+    return _initializationCompleter.future;
+  }
+
   /// 初始化相机
   Future<bool> initializeCamera() async {
-    if (!Platform.isIOS) return false;
+    // 如果已经初始化或非iOS平台，无需再次初始化
+    if (_isInitialized) return true;
+    if (!Platform.isIOS) {
+      _initializationCompleter.complete(false);
+      return false;
+    }
 
     try {
       final bool success = await _channel.invokeMethod('initializeCamera');
+
+      _isInitialized = success;
+
+      // 完成初始化器
+      if (!_initializationCompleter.isCompleted) {
+        _initializationCompleter.complete(success);
+      }
+
       return success;
     } on PlatformException catch (e) {
       debugPrint('初始化相机时出错: ${e.message}');
+
+      // 初始化失败，完成初始化器
+      if (!_initializationCompleter.isCompleted) {
+        _initializationCompleter.complete(false);
+      }
+
       return false;
     }
   }
@@ -96,6 +146,15 @@ class NativeCameraController {
   /// 相机事件回调
   final void Function(Map<String, dynamic>)? onCameraEvent;
 
+  /// 事件通道是否连接成功
+  bool _isEventChannelConnected = false;
+
+  /// 事件通道连接重试次数
+  int _eventChannelRetryCount = 0;
+
+  /// 最大重试次数
+  static const int _maxRetryCount = 3;
+
   /// 私有构造函数
   NativeCameraController._({
     required this.cameraId,
@@ -111,20 +170,36 @@ class NativeCameraController {
         MethodChannel('com.haohaopai.app/native_camera_view_$cameraId');
     controller._eventChannel =
         EventChannel('com.haohaopai.app/native_camera_events_$cameraId');
+
+    // 延迟设置事件通道，给原生代码足够时间注册
     if (onCameraEvent != null) {
-      controller._setupEventChannel();
+      // 先等待一段时间，让原生视图有足够时间进行初始化和注册
+      Future.delayed(const Duration(milliseconds: 500), () {
+        controller._setupEventChannel();
+      });
     }
     return controller;
   }
 
   /// 设置事件通道
   void _setupEventChannel() {
+    // 避免重复设置
+    if (_isEventChannelConnected || _eventSubscription != null) {
+      return;
+    }
+
     try {
-      debugPrint('正在连接相机事件通道: ${_eventChannel.name}');
+      _eventChannelRetryCount++;
+      debugPrint(
+          '正在连接相机事件通道: ${_eventChannel.name} (尝试 $_eventChannelRetryCount/$_maxRetryCount)');
 
       // 使用try-catch包裹事件流订阅
       _eventSubscription = _eventChannel.receiveBroadcastStream().listen(
         (dynamic event) {
+          // 成功收到事件，标记为已连接
+          _isEventChannelConnected = true;
+          _eventChannelRetryCount = 0;
+
           if (event is Map) {
             final eventData = Map<String, dynamic>.from(event);
             debugPrint('收到相机事件: ${eventData['type']}');
@@ -134,30 +209,68 @@ class NativeCameraController {
           }
         },
         onError: (dynamic error) {
-          // 忽略MissingPluginException，在iOS平台这是正常的
+          // 错误处理
           if (error.toString().contains('MissingPluginException')) {
-            debugPrint('忽略预期的MissingPluginException错误');
+            debugPrint('事件通道MissingPluginException - 需要重试');
+
+            // 释放当前订阅
+            _eventSubscription?.cancel();
+            _eventSubscription = null;
+            _isEventChannelConnected = false;
+
+            // 如果还没有超过最大重试次数，延迟后重试
+            if (_eventChannelRetryCount < _maxRetryCount) {
+              Future.delayed(
+                  Duration(milliseconds: 1000 * _eventChannelRetryCount), () {
+                if (!_isEventChannelConnected && onCameraEvent != null) {
+                  debugPrint('尝试重新连接事件通道');
+                  _setupEventChannel();
+                }
+              });
+            } else {
+              debugPrint('事件通道连接失败，已达到最大重试次数 $_maxRetryCount');
+            }
           } else {
             debugPrint('相机事件通道错误: $error');
           }
-
-          // 出错时尝试重新连接事件通道，增加延迟减少频繁重连
-          Future.delayed(const Duration(seconds: 2), () {
-            if (_eventSubscription == null && onCameraEvent != null) {
-              debugPrint('尝试重新连接事件通道');
-              _setupEventChannel();
-            }
-          });
         },
         cancelOnError: false,
       );
     } catch (e) {
-      // 忽略MissingPluginException，在iOS平台这是正常的
+      // 处理其他异常
       if (e.toString().contains('MissingPluginException')) {
-        debugPrint('设置事件通道时忽略预期的MissingPluginException错误');
+        debugPrint('设置事件通道时遇到MissingPluginException - 稍后将重试');
+
+        // 如果是MissingPluginException，延迟后重试
+        if (_eventChannelRetryCount < _maxRetryCount) {
+          Future.delayed(Duration(milliseconds: 1000 * _eventChannelRetryCount),
+              () {
+            if (!_isEventChannelConnected && onCameraEvent != null) {
+              debugPrint('尝试重新连接事件通道');
+              _setupEventChannel();
+            }
+          });
+        }
       } else {
         debugPrint('设置事件通道时出错: $e');
       }
+    }
+  }
+
+  /// 重新连接事件通道（主动调用）
+  void reconnectEventChannel() {
+    // 如果已连接，先断开
+    if (_eventSubscription != null) {
+      _eventSubscription?.cancel();
+      _eventSubscription = null;
+    }
+
+    _isEventChannelConnected = false;
+    _eventChannelRetryCount = 0; // 重置重试计数
+
+    // 如果有回调，尝试重新连接
+    if (onCameraEvent != null) {
+      _setupEventChannel();
     }
   }
 
