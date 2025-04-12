@@ -4,8 +4,9 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-import 'camera/native_camera_service.dart';
-import 'camera/camera_screen.dart';
+import 'camera/services/camera_service.dart';
+import 'camera/state/camera_state_manager.dart';
+import 'camera/screens/camera_screen.dart';
 import 'home/home.dart';
 import 'home/settings_screen.dart';
 import 'login/auth_provider.dart';
@@ -33,6 +34,7 @@ Future<void> main() async {
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider.value(value: CameraStateManager.instance),
       ],
       child: const MyApp(),
     ),
@@ -44,7 +46,7 @@ Future<void> main() async {
     Future.microtask(() async {
       try {
         debugPrint('开始在后台初始化相机...');
-        final success = await NativeCameraService.instance.initializeCamera();
+        final success = await CameraService.instance.initializeCamera();
         debugPrint('相机初始化${success ? '成功' : '失败'}');
       } catch (e) {
         debugPrint('相机初始化出错: $e');

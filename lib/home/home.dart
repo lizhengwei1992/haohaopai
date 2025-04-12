@@ -6,8 +6,8 @@ import 'package:flutter_svg/flutter_svg.dart';
 import '../utils/settings_provider.dart';
 import '../login/auth_provider.dart';
 import 'settings_screen.dart';
-import '../camera/camera_screen.dart';
-import '../camera/native_camera_service.dart';
+import '../camera/screens/camera_screen.dart';
+import '../camera/services/camera_service.dart';
 import 'messages_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -93,7 +93,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return GestureDetector(
       onTap: () async {
         // 检查相机是否已准备好
-        bool isReady = await NativeCameraService.instance.isCameraReady();
+        bool isReady = await CameraService.instance.isCameraReady();
 
         if (!isReady) {
           // 显示加载对话框
@@ -123,7 +123,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           );
 
           // 等待相机初始化完成
-          await NativeCameraService.instance.waitForInitialization();
+          await CameraService.instance.waitForInitialization();
 
           // 关闭加载对话框
           Navigator.of(context).pop();
