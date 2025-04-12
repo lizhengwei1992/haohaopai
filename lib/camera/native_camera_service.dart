@@ -16,11 +16,45 @@ class NativeCameraService {
   // 是否已初始化
   bool _isInitialized = false;
 
+  // 全局相机控制器实例
+  NativeCameraController? _globalCameraController;
+
   // 私有构造函数确保单例模式
   NativeCameraService._();
 
   // 静态实例
   static final NativeCameraService instance = NativeCameraService._();
+
+  /// 获取全局相机控制器
+  NativeCameraController? getGlobalCameraController() {
+    return _globalCameraController;
+  }
+
+  /// 创建或获取全局相机控制器
+  Future<NativeCameraController> getOrCreateCameraController({
+    required int cameraId,
+    Function(Map<String, dynamic>)? onCameraEvent,
+  }) async {
+    // 如果全局控制器已存在，更新事件处理器并返回
+    if (_globalCameraController != null) {
+      _globalCameraController!.updateEventHandler(onCameraEvent);
+      return _globalCameraController!;
+    }
+
+    // 创建新的相机控制器
+    _globalCameraController = NativeCameraController(
+      cameraId: cameraId,
+      onCameraEvent: onCameraEvent,
+    );
+
+    return _globalCameraController!;
+  }
+
+  /// 释放全局相机控制器
+  void releaseGlobalCameraController() {
+    _globalCameraController?.dispose();
+    _globalCameraController = null;
+  }
 
   /// 检查设备是否支持原生相机
   Future<bool> isNativeCameraSupported() async {
@@ -146,6 +180,9 @@ class NativeCameraController {
   /// 相机事件回调
   final void Function(Map<String, dynamic>)? onCameraEvent;
 
+  /// 实际使用的事件处理器（可更新）
+  void Function(Map<String, dynamic>)? _eventHandler;
+
   /// 事件通道是否连接成功
   bool _isEventChannelConnected = false;
 
@@ -159,7 +196,10 @@ class NativeCameraController {
   NativeCameraController._({
     required this.cameraId,
     this.onCameraEvent,
-  });
+  }) {
+    // 初始化时设置事件处理器
+    _eventHandler = onCameraEvent;
+  }
 
   /// 创建实例的工厂方法
   factory NativeCameraController(
@@ -203,7 +243,7 @@ class NativeCameraController {
           if (event is Map) {
             final eventData = Map<String, dynamic>.from(event);
             debugPrint('收到相机事件: ${eventData['type']}');
-            onCameraEvent?.call(eventData);
+            _eventHandler?.call(eventData);
           } else {
             debugPrint('收到未知格式的相机事件: $event');
           }
@@ -222,7 +262,7 @@ class NativeCameraController {
             if (_eventChannelRetryCount < _maxRetryCount) {
               Future.delayed(
                   Duration(milliseconds: 1000 * _eventChannelRetryCount), () {
-                if (!_isEventChannelConnected && onCameraEvent != null) {
+                if (!_isEventChannelConnected && _eventHandler != null) {
                   debugPrint('尝试重新连接事件通道');
                   _setupEventChannel();
                 }
@@ -245,7 +285,7 @@ class NativeCameraController {
         if (_eventChannelRetryCount < _maxRetryCount) {
           Future.delayed(Duration(milliseconds: 1000 * _eventChannelRetryCount),
               () {
-            if (!_isEventChannelConnected && onCameraEvent != null) {
+            if (!_isEventChannelConnected && _eventHandler != null) {
               debugPrint('尝试重新连接事件通道');
               _setupEventChannel();
             }
@@ -269,7 +309,7 @@ class NativeCameraController {
     _eventChannelRetryCount = 0; // 重置重试计数
 
     // 如果有回调，尝试重新连接
-    if (onCameraEvent != null) {
+    if (_eventHandler != null) {
       _setupEventChannel();
     }
   }
@@ -397,6 +437,17 @@ class NativeCameraController {
   void dispose() {
     _eventSubscription?.cancel();
     _eventSubscription = null;
+  }
+
+  /// 更新事件处理器
+  void updateEventHandler(Function(Map<String, dynamic>)? newEventHandler) {
+    _eventHandler = newEventHandler;
+
+    // 如果已经连接事件通道，不需要重新设置
+    // 如果未连接，且有新的处理器，则重新连接
+    if (!_isEventChannelConnected && _eventHandler != null) {
+      reconnectEventChannel();
+    }
   }
 }
 

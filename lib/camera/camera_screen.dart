@@ -44,8 +44,9 @@ class _CameraScreenState extends State<CameraScreen>
         await NativeCameraService.instance.waitForInitialization();
       }
 
-      // 创建相机控制器并增加错误捕获
-      _nativeCameraController = NativeCameraController(
+      // 获取或创建全局相机控制器
+      _nativeCameraController =
+          await NativeCameraService.instance.getOrCreateCameraController(
         cameraId: 0,
         onCameraEvent: _handleCameraEvent,
       );
@@ -157,12 +158,8 @@ class _CameraScreenState extends State<CameraScreen>
 
   @override
   void dispose() {
-    // 安全释放相机控制器
-    try {
-      _nativeCameraController?.dispose();
-    } catch (e) {
-      debugPrint('释放相机资源时出错: $e');
-    }
+    // 不再释放相机控制器，而是保留全局实例
+    // 只在应用退出时才真正释放资源
 
     // 移除生命周期监听
     WidgetsBinding.instance.removeObserver(this);
