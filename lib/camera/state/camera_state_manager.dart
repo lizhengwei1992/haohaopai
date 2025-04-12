@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../controls/filter_control.dart';
+import '../services/native_camera_service.dart';
 
 /// 全局相机状态管理器
 class CameraStateManager extends ChangeNotifier {
@@ -11,9 +12,17 @@ class CameraStateManager extends ChangeNotifier {
   // 私有构造函数确保单例模式
   CameraStateManager._internal();
 
+  // 相机初始化状态
+  bool _isCameraInitialized = false;
+  String _currentCameraType = 'back'; // 默认使用后置相机
+  bool _isProcessingCameraChange = false;
+
   // 相机控制状态
   bool _isFlashOn = false;
+  String _flashMode = 'auto'; // 闪光灯模式: 'auto' 或 'off'
   double _currentZoomLevel = 1.0;
+  final ValueNotifier<double> currentZoomLevelNotifier =
+      ValueNotifier<double>(1.0);
   double _minZoomLevel = 1.0;
   double _maxZoomLevel = 3.0;
   bool _showGridLines = false;
@@ -23,6 +32,9 @@ class CameraStateManager extends ChangeNotifier {
   double _baseScaleLevel = 1.0;
   bool _isCameraChanging = false;
   Map<String, dynamic> _cameraCapabilities = {};
+  double _currentExposureValue = 0.0;
+  double _minExposureValue = -2.0;
+  double _maxExposureValue = 2.0;
 
   // 焦点相关
   Offset? _focusPoint;
@@ -30,7 +42,11 @@ class CameraStateManager extends ChangeNotifier {
   bool _focusSuccess = false;
 
   // Getters
+  bool get isCameraInitialized => _isCameraInitialized;
+  String get currentCameraType => _currentCameraType;
+  bool get isProcessingCameraChange => _isProcessingCameraChange;
   bool get isFlashOn => _isFlashOn;
+  String get flashMode => _flashMode;
   double get currentZoomLevel => _currentZoomLevel;
   double get minZoomLevel => _minZoomLevel;
   double get maxZoomLevel => _maxZoomLevel;
@@ -44,11 +60,36 @@ class CameraStateManager extends ChangeNotifier {
   Offset? get focusPoint => _focusPoint;
   bool get showFocusPoint => _showFocusPoint;
   bool get focusSuccess => _focusSuccess;
+  double get currentExposureValue => _currentExposureValue;
+  double get minExposureValue => _minExposureValue;
+  double get maxExposureValue => _maxExposureValue;
 
   // Setters
+  set isCameraInitialized(bool value) {
+    _isCameraInitialized = value;
+    notifyListeners();
+  }
+
+  set currentCameraType(String value) {
+    _currentCameraType = value;
+    notifyListeners();
+  }
+
+  set isProcessingCameraChange(bool value) {
+    _isProcessingCameraChange = value;
+    notifyListeners();
+  }
+
   set isFlashOn(bool value) {
     _isFlashOn = value;
     notifyListeners();
+  }
+
+  set flashMode(String value) {
+    if (value == 'auto' || value == 'off') {
+      _flashMode = value;
+      notifyListeners();
+    }
   }
 
   set currentZoomLevel(double value) {
@@ -58,6 +99,7 @@ class CameraStateManager extends ChangeNotifier {
       value = _maxZoomLevel;
     }
     _currentZoomLevel = value;
+    currentZoomLevelNotifier.value = value;
     notifyListeners();
   }
 
@@ -121,6 +163,26 @@ class CameraStateManager extends ChangeNotifier {
     notifyListeners();
   }
 
+  set currentExposureValue(double value) {
+    if (value < _minExposureValue) {
+      value = _minExposureValue;
+    } else if (value > _maxExposureValue) {
+      value = _maxExposureValue;
+    }
+    _currentExposureValue = value;
+    notifyListeners();
+  }
+
+  set minExposureValue(double value) {
+    _minExposureValue = value;
+    notifyListeners();
+  }
+
+  set maxExposureValue(double value) {
+    _maxExposureValue = value;
+    notifyListeners();
+  }
+
   // 更新焦点
   void updateFocus(Offset? point, bool show, bool success) {
     _focusPoint = point;
@@ -136,9 +198,33 @@ class CameraStateManager extends ChangeNotifier {
   }
 
   // 切换闪光灯状态
-  void toggleFlash() {
-    _isFlashOn = !_isFlashOn;
-    notifyListeners();
+  Future<void> toggleFlash() async {
+    // 在auto和off之间切换
+    final newMode = _flashMode == 'auto' ? 'off' : 'auto';
+    debugPrint('切换闪光灯模式: 从 $_flashMode 到 $newMode');
+
+    try {
+      final cameraController =
+          NativeCameraService.instance.getGlobalCameraController();
+      if (cameraController != null) {
+        debugPrint('调用原生方法设置闪光灯模式: $newMode');
+        final success = await cameraController.setFlashMode(newMode);
+        debugPrint('设置闪光灯模式结果: $success');
+
+        if (success) {
+          _flashMode = newMode;
+          _isFlashOn = newMode == 'auto'; // auto模式下isFlashOn为true，off模式下为false
+          debugPrint('更新闪光灯状态: mode=$_flashMode, isOn=$_isFlashOn');
+          notifyListeners();
+        } else {
+          debugPrint('设置闪光灯模式失败');
+        }
+      } else {
+        debugPrint('相机控制器为空，无法设置闪光灯模式');
+      }
+    } catch (e) {
+      debugPrint('切换闪光灯模式时出错: $e');
+    }
   }
 
   // 切换网格线显示
@@ -160,6 +246,289 @@ class CameraStateManager extends ChangeNotifier {
     final currentIndex = ratios.indexOf(_currentAspectRatio);
     final nextIndex = (currentIndex + 1) % ratios.length;
     _currentAspectRatio = ratios[nextIndex];
+    notifyListeners();
+  }
+
+  /// 初始化相机设置
+  /// 获取设备支持的相机参数并设置默认值
+  Future<void> initializeCameraSettings() async {
+    if (_isCameraInitialized) return; // 如果已初始化，直接返回
+
+    try {
+      // 获取相机能力
+      final capabilities =
+          await NativeCameraService.instance.getCameraCapabilities();
+
+      debugPrint('获取到的相机能力: $capabilities');
+
+      // 更新相机能力信息
+      _cameraCapabilities = capabilities;
+
+      // 获取原始相机类型列表
+      final rawCameraTypes = _getRawCameraTypes();
+      debugPrint('获取到的原始相机类型: $rawCameraTypes');
+
+      // 检查是否支持超广角
+      final hasUltraWide = rawCameraTypes.contains('ultraWide');
+      debugPrint('是否支持超广角: $hasUltraWide');
+
+      // 设置缩放范围（如果支持超广角，则下限可设为0.5）
+      _minZoomLevel = hasUltraWide ? 0.5 : 1.0;
+      debugPrint('设置缩放下限为: $_minZoomLevel');
+
+      // 设置默认相机类型（优先使用后置相机）
+      List<String> availableCameras = _getAvailableCameras();
+      debugPrint('获取到的相机类型: $availableCameras');
+
+      if (availableCameras.contains('back')) {
+        _currentCameraType = 'back';
+        debugPrint('使用后置相机作为默认相机');
+      } else if (availableCameras.isNotEmpty) {
+        _currentCameraType = availableCameras.first;
+        debugPrint('使用第一个可用相机作为默认相机: $_currentCameraType');
+      } else {
+        debugPrint('没有可用的相机，仍然使用默认值: back');
+      }
+
+      // 设置默认拍摄比例
+      _currentAspectRatio = capabilities['defaultAspectRatio'] ?? '4:3';
+
+      // 设置缩放范围
+      _maxZoomLevel = capabilities['maxZoomLevel']?.toDouble() ?? 3.0;
+      // 默认缩放比例固定为 1.0，无论设备是否支持超广角
+      _currentZoomLevel = 1.0;
+      currentZoomLevelNotifier.value = _currentZoomLevel; // 确保初始值正确
+      debugPrint('设置默认缩放比例为: 1.0');
+
+      // 设置曝光范围
+      _minExposureValue = capabilities['minExposureValue']?.toDouble() ?? -2.0;
+      _maxExposureValue = capabilities['maxExposureValue']?.toDouble() ?? 2.0;
+      _currentExposureValue = 0.0; // 默认曝光值
+
+      // 设置默认闪光灯模式
+      _flashMode = 'auto';
+      _isFlashOn = true;
+      final cameraController =
+          NativeCameraService.instance.getGlobalCameraController();
+      if (cameraController != null) {
+        await cameraController.setFlashMode(_flashMode);
+      }
+
+      // 标记初始化完成
+      _isCameraInitialized = true;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('初始化相机设置时出错: $e');
+    }
+  }
+
+  /// 获取原始的相机类型列表（包括wide, ultraWide, telephoto等）
+  List<String> _getRawCameraTypes() {
+    // 从supportedCameraTypes字段获取
+    final camerasData = _cameraCapabilities['supportedCameraTypes'];
+    if (camerasData == null || !(camerasData is List)) {
+      // 尝试从cameraTypes字段获取（向后兼容）
+      final oldCamerasData = _cameraCapabilities['cameraTypes'];
+      if (oldCamerasData == null || !(oldCamerasData is List)) {
+        debugPrint('未找到相机类型信息，使用默认值: [wide]');
+        return ['wide']; // 默认值
+      }
+      return List<String>.from(oldCamerasData);
+    }
+    return List<String>.from(camerasData);
+  }
+
+  /// 获取可用的相机类型列表
+  List<String> _getAvailableCameras() {
+    // 首先尝试从supportedCameraTypes字段获取
+    final camerasData = _cameraCapabilities['supportedCameraTypes'];
+    if (camerasData == null || !(camerasData is List)) {
+      // 然后尝试从cameraTypes字段获取（向后兼容）
+      final oldCamerasData = _cameraCapabilities['cameraTypes'];
+      if (oldCamerasData == null || !(oldCamerasData is List)) {
+        debugPrint('未找到相机类型信息，使用默认值: [back]');
+        return ['back']; // 默认值
+      }
+      return List<String>.from(oldCamerasData);
+    }
+
+    // 将原生相机类型转换为Flutter端使用的类型
+    final List<dynamic> nativeCameraTypes = camerasData;
+    final Set<String> mappedCameraTypes = {};
+
+    for (final cameraType in nativeCameraTypes) {
+      if (cameraType == 'front') {
+        mappedCameraTypes.add('front');
+      } else if (cameraType == 'wide' ||
+          cameraType == 'ultraWide' ||
+          cameraType == 'telephoto') {
+        // 所有后置相机类型都映射为'back'
+        mappedCameraTypes.add('back');
+      }
+    }
+
+    debugPrint('可用相机类型: $mappedCameraTypes');
+
+    // 确保至少有一个相机类型
+    if (mappedCameraTypes.isEmpty) {
+      return ['back']; // 默认值
+    }
+
+    return mappedCameraTypes.toList();
+  }
+
+  /// 获取可用的相机类型列表（公开方法）
+  List<String> getAvailableCameras() {
+    return _getAvailableCameras();
+  }
+
+  /// 切换相机（前置/后置）
+  Future<void> switchCamera() async {
+    debugPrint('调用switchCamera方法');
+    debugPrint('当前相机类型: $_currentCameraType');
+
+    List<String> availableCameras = _getAvailableCameras();
+    debugPrint('可用相机类型: $availableCameras, 数量: ${availableCameras.length}');
+
+    if (_isProcessingCameraChange) {
+      debugPrint('相机切换已在进行中，忽略本次请求');
+      return; // 防止多次点击
+    }
+
+    _isProcessingCameraChange = true;
+    notifyListeners();
+    debugPrint('开始切换相机');
+
+    try {
+      if (availableCameras.length <= 1) {
+        // 只有一个相机，无法切换
+        debugPrint('只有一个相机可用，无法切换');
+        _isProcessingCameraChange = false;
+        notifyListeners();
+        return;
+      }
+
+      // 切换相机类型
+      final isFront = _currentCameraType == 'front';
+      final toFront = !isFront;
+      debugPrint(
+          '当前相机: ${isFront ? "前置" : "后置"}, 切换至: ${toFront ? "前置" : "后置"}');
+
+      // 获取相机控制器
+      final cameraController =
+          NativeCameraService.instance.getGlobalCameraController();
+      if (cameraController != null) {
+        // 切换相机
+        debugPrint('调用原生方法切换相机');
+        final success = await cameraController.switchCamera(toFront: toFront);
+        debugPrint('切换相机结果: $success');
+
+        if (success) {
+          _currentCameraType = toFront ? 'front' : 'back';
+          debugPrint('相机类型已更新: $_currentCameraType');
+
+          // 在事件处理时会将isProcessingCameraChange设为false
+          // 如果没有收到事件，5秒后自动重置状态
+          Future.delayed(const Duration(seconds: 5), () {
+            if (_isProcessingCameraChange) {
+              debugPrint('未收到相机切换完成事件，自动重置状态');
+              _isProcessingCameraChange = false;
+              notifyListeners();
+            }
+          });
+        } else {
+          // 切换失败，重置状态
+          debugPrint('切换相机失败');
+          _isProcessingCameraChange = false;
+          notifyListeners();
+        }
+      } else {
+        debugPrint('相机控制器为空，无法切换相机');
+        _isProcessingCameraChange = false;
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('切换相机时出错: $e');
+      _isProcessingCameraChange = false;
+      notifyListeners();
+    }
+  }
+
+  /// 设置曝光值
+  Future<void> setExposure(double value) async {
+    // 确保值在范围内
+    if (value < _minExposureValue) {
+      value = _minExposureValue;
+    } else if (value > _maxExposureValue) {
+      value = _maxExposureValue;
+    }
+
+    try {
+      final cameraController =
+          NativeCameraService.instance.getGlobalCameraController();
+      if (cameraController != null) {
+        // 这里需要在NativeCameraController中添加设置曝光的方法
+        // 暂时只更新状态
+        _currentExposureValue = value;
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('设置曝光值时出错: $e');
+    }
+  }
+
+  /// 设置缩放级别
+  Future<void> setZoom(double value) async {
+    // 确保值在范围内
+    if (value < _minZoomLevel) {
+      value = _minZoomLevel;
+    } else if (value > _maxZoomLevel) {
+      value = _maxZoomLevel;
+    }
+
+    try {
+      final cameraController =
+          NativeCameraService.instance.getGlobalCameraController();
+      if (cameraController != null) {
+        final success = await cameraController.setZoomLevel(value);
+        if (success) {
+          _currentZoomLevel = value;
+          currentZoomLevelNotifier.value = value;
+          notifyListeners();
+        }
+      }
+    } catch (e) {
+      debugPrint('设置缩放级别时出错: $e');
+    }
+  }
+
+  /// 设置拍摄比例
+  void setAspectRatio(String ratio) {
+    if (['4:3', '1:1', '16:9'].contains(ratio)) {
+      _currentAspectRatio = ratio;
+      notifyListeners();
+    }
+  }
+
+  /// 重置所有相机设置为默认值
+  Future<void> resetToDefaults() async {
+    _isFlashOn = true;
+    _flashMode = 'auto';
+    _currentZoomLevel = 1.0;
+    currentZoomLevelNotifier.value = _currentZoomLevel;
+    _showGridLines = false;
+    _currentAspectRatio = '4:3';
+    _currentFilter = FilterType.none;
+    _currentExposureValue = 0.0;
+
+    // 应用设置到相机
+    final cameraController =
+        NativeCameraService.instance.getGlobalCameraController();
+    if (cameraController != null) {
+      await cameraController.setFlashMode(_flashMode);
+      await cameraController.setZoomLevel(_currentZoomLevel);
+    }
+
     notifyListeners();
   }
 }

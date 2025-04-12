@@ -56,6 +56,12 @@ class NativeCameraView: NSObject, FlutterPlatformView, FlutterStreamHandler {
         // 获取预览层并添加到视图
         if let previewLayer = CameraSingleton.shared.getPreviewLayer() {
             previewLayer.frame = _view.bounds
+            
+            // 确保预览层使用正确的视频显示模式
+            // 使用 .resizeAspect 可以保持宽高比并显示完整的内容
+            // 如果想要更大的画面，可以使用 .resizeAspectFill
+            previewLayer.videoGravity = .resizeAspectFill
+            
             _view.layer.addSublayer(previewLayer)
             
             // 添加观察者监听视图大小变化，以更新预览层大小
@@ -178,6 +184,19 @@ class NativeCameraView: NSObject, FlutterPlatformView, FlutterStreamHandler {
                         result(true)
                     } else {
                         result(FlutterError(code: "ZOOM_FAILED", message: error ?? "设置缩放失败", details: nil))
+                    }
+                }
+            } else {
+                result(FlutterError(code: "INVALID_ARGS", message: "无效的参数", details: nil))
+            }
+            
+        case "setFlashMode":
+            if let args = call.arguments as? [String: Any], let mode = args["mode"] as? String {
+                CameraSingleton.shared.setFlashMode(mode) { success, error in
+                    if success {
+                        result(true)
+                    } else {
+                        result(FlutterError(code: "FLASH_FAILED", message: error ?? "设置闪光灯模式失败", details: nil))
                     }
                 }
             } else {

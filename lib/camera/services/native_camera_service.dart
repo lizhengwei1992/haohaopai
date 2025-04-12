@@ -419,6 +419,20 @@ class NativeCameraController {
     }
   }
 
+  /// 设置闪光灯模式
+  Future<bool> setFlashMode(String mode) async {
+    try {
+      final bool success = await _methodChannel.invokeMethod(
+        'setFlashMode',
+        {'mode': mode},
+      );
+      return success;
+    } on PlatformException catch (e) {
+      debugPrint('设置闪光灯模式时出错: ${e.message}');
+      return false;
+    }
+  }
+
   /// 设置对焦点
   Future<bool> setFocusPoint(double x, double y) async {
     try {

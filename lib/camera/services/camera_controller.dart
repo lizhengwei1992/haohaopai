@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import '../native_camera_service.dart';
+import 'native_camera_service.dart';
 
 /// 相机控制器类，封装相机操作
 class CameraController {

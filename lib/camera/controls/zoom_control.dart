@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../state/camera_state_manager.dart';
-import '../services/camera_service.dart';
 
 /// 缩放控制组件
 class ZoomControl extends StatelessWidget {
@@ -9,20 +8,9 @@ class ZoomControl extends StatelessWidget {
   // 设置缩放级别
   Future<void> setZoomLevel(double zoomLevel) async {
     final cameraState = CameraStateManager.instance;
-    final cameraService = CameraService.instance;
 
-    // 获取全局控制器
-    final nativeCameraController = cameraService.getGlobalCameraController();
-    if (nativeCameraController != null) {
-      // 使用原生相机设置缩放
-      final success = await nativeCameraController.setZoomLevel(zoomLevel);
-      if (success) {
-        cameraState.currentZoomLevel = zoomLevel;
-      }
-    } else {
-      // 仅更新状态，模拟缩放效果
-      cameraState.currentZoomLevel = zoomLevel;
-    }
+    // 使用CameraStateManager的方法设置缩放
+    await cameraState.setZoom(zoomLevel);
   }
 
   // 处理缩放选项点击
@@ -46,30 +34,49 @@ class ZoomControl extends StatelessWidget {
   Widget build(BuildContext context) {
     final cameraState = CameraStateManager.instance;
 
-    return Container(
-      height: 40,
-      color: Colors.transparent,
-      child: Center(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            color: const Color.fromRGBO(80, 80, 80, 0.2),
-            borderRadius: BorderRadius.circular(40),
+    // 使用 ValueListenableBuilder 来监听焦距变化
+    return ValueListenableBuilder<double>(
+      valueListenable: cameraState.currentZoomLevelNotifier,
+      builder: (context, zoomLevel, child) {
+        return Container(
+          height: 40,
+          color: Colors.transparent,
+          child: Center(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color.fromRGBO(80, 80, 80, 0.2),
+                borderRadius: BorderRadius.circular(40),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // 显示当前焦距值
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Text(
+                      '${zoomLevel.toStringAsFixed(1)}×',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  _buildZoomOption('0.5×', (zoomLevel - 0.5).abs() < 0.1),
+                  const SizedBox(width: 6),
+                  _buildZoomOption('1×', (zoomLevel - 1.0).abs() < 0.1),
+                  const SizedBox(width: 6),
+                  _buildZoomOption('2×', (zoomLevel - 2.0).abs() < 0.1),
+                  const SizedBox(width: 6),
+                  _buildZoomOption('3×', (zoomLevel - 3.0).abs() < 0.1),
+                ],
+              ),
+            ),
           ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildZoomOption('0.5×', cameraState.currentZoomLevel == 0.5),
-              const SizedBox(width: 6),
-              _buildZoomOption('1×', cameraState.currentZoomLevel == 1.0),
-              const SizedBox(width: 6),
-              _buildZoomOption('2×', cameraState.currentZoomLevel == 2.0),
-              const SizedBox(width: 6),
-              _buildZoomOption('3×', cameraState.currentZoomLevel == 3.0),
-            ],
-          ),
-        ),
-      ),
+        );
+      },
     );
   }
 

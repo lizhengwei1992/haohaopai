@@ -9,11 +9,16 @@ class AspectRatioControl extends StatelessWidget {
   Future<void> toggleAspectRatio() async {
     final cameraState = CameraStateManager.instance;
 
-    // 循环切换可用比例
-    cameraState.toggleAspectRatio();
+    // 获取当前比例并计算下一个比例
+    final ratios = ['4:3', '1:1', '16:9'];
+    final currentIndex = ratios.indexOf(cameraState.currentAspectRatio);
+    final nextIndex = (currentIndex + 1) % ratios.length;
+    final nextRatio = ratios[nextIndex];
 
-    // TODO: 调用原生相机控制宽高比
-    debugPrint('拍摄比例设置功能尚未实现');
+    // 使用CameraStateManager的方法设置拍摄比例
+    cameraState.setAspectRatio(nextRatio);
+
+    debugPrint('拍摄比例已设置为: $nextRatio');
   }
 
   @override

@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'camera_controller.dart';
-import '../native_camera_service.dart';
+import 'native_camera_service.dart';
 
 /// 相机服务类，单例模式管理全局相机资源
 class CameraService {

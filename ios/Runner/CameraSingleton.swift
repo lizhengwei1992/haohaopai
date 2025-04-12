@@ -218,14 +218,21 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     /// 切换前后摄像头
     func switchCamera(toFront: Bool, completion: @escaping (Bool, String?) -> Void) {
         guard isInitialized, let session = captureSession else {
+            print("切换相机失败: 相机未初始化")
             completion(false, "相机未初始化")
             return
         }
         
         let newPosition: AVCaptureDevice.Position = toFront ? .front : .back
+        print("切换相机: 请求切换到 \(toFront ? "前置" : "后置") 相机")
         
         // 如果已经是请求的摄像头位置，直接返回成功
         if currentPosition == newPosition {
+            print("相机已经是 \(toFront ? "前置" : "后置") 相机，无需切换")
+            
+            // 仍然发送事件，保持一致性
+            sendEvent(type: "cameraSwitched", data: ["position": toFront ? "front" : "back"])
+            
             completion(true, nil)
             return
         }
@@ -233,14 +240,20 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         // 在后台线程执行摄像头切换
         DispatchQueue.global(qos: .userInitiated).async {
             do {
+                print("开始配置新摄像头")
                 // 配置新摄像头
                 try self.configureCamera(position: newPosition)
+                
+                print("相机切换成功: \(toFront ? "前置" : "后置")")
+                // 发送相机切换事件
+                self.sendEvent(type: "cameraSwitched", data: ["position": toFront ? "front" : "back"])
                 
                 // 在主线程返回结果
                 DispatchQueue.main.async {
                     completion(true, nil)
                 }
             } catch {
+                print("切换相机失败: \(error.localizedDescription)")
                 // 在主线程返回错误
                 DispatchQueue.main.async {
                     completion(false, "切换摄像头失败: \(error.localizedDescription)")
@@ -250,27 +263,72 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     }
     
     /// 设置缩放级别
-    func setZoomLevel(_ zoomLevel: CGFloat, completion: @escaping (Bool, String?) -> Void) {
+    func setZoomLevel(_ zoomLevel: CGFloat, completion: ((Bool, String?) -> Void)? = nil) {
         guard let device = currentDevice else {
-            completion(false, "没有活动的相机设备")
+            completion?(false, "当前设备不可用")
             return
         }
         
-        // 确保缩放级别在设备支持的范围内
-        let clampedZoomLevel = max(1.0, min(zoomLevel, device.activeFormat.videoMaxZoomFactor))
-        
         do {
             try device.lockForConfiguration()
-            device.videoZoomFactor = clampedZoomLevel
+            
+            // 确保缩放值在合法范围内
+            let zoom = min(max(zoomLevel, 1.0), device.activeFormat.videoMaxZoomFactor)
+            device.videoZoomFactor = zoom
+            currentZoomFactor = zoom
+            
             device.unlockForConfiguration()
             
-            currentZoomFactor = clampedZoomLevel
-            completion(true, nil)
+            // 发送缩放变化事件
+            sendEvent(type: "zoomChanged", data: ["zoomFactor": zoom])
             
-            // 发送缩放更改事件
-            sendEvent(type: "zoomChanged", data: ["zoomFactor": clampedZoomLevel])
+            completion?(true, nil)
         } catch {
-            completion(false, "设置缩放级别失败: \(error.localizedDescription)")
+            completion?(false, "设置缩放级别失败: \(error.localizedDescription)")
+        }
+    }
+    
+    /// 设置闪光灯模式
+    func setFlashMode(_ mode: String, completion: ((Bool, String?) -> Void)? = nil) {
+        guard let device = currentDevice else {
+            completion?(false, "当前设备不可用")
+            return
+        }
+        
+        print("设置闪光灯模式: \(mode)")
+        
+        // 转换字符串模式为AVCaptureDevice.FlashMode
+        let flashMode: AVCaptureDevice.FlashMode
+        switch mode {
+        case "auto":
+            flashMode = .auto
+        case "on":
+            flashMode = .on
+        case "off":
+            flashMode = .off
+        default:
+            flashMode = .auto // 默认为自动
+        }
+        
+        // 检查设备是否支持此闪光灯模式
+        if device.hasFlash && device.isFlashAvailable && device.isFlashModeSupported(flashMode) {
+            do {
+                try device.lockForConfiguration()
+                device.flashMode = flashMode
+                device.unlockForConfiguration()
+                
+                // 发送闪光灯模式变化事件
+                print("发送闪光灯模式变化事件: \(mode)")
+                sendEvent(type: "flashModeChanged", data: ["mode": mode])
+                
+                completion?(true, nil)
+            } catch {
+                print("设置闪光灯模式失败: \(error.localizedDescription)")
+                completion?(false, "设置闪光灯模式失败: \(error.localizedDescription)")
+            }
+        } else {
+            print("设备不支持当前闪光灯模式")
+            completion?(false, "设备不支持当前闪光灯模式")
         }
     }
     
@@ -455,8 +513,10 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         session.beginConfiguration()
         
         // 设置会话预设
-        if session.canSetSessionPreset(.high) {
-            session.sessionPreset = .high
+        // 使用 .photo 预设，这会提供更高质量的预览
+        // 原来是 .high，这可能不是最适合显示的分辨率
+        if session.canSetSessionPreset(.photo) {
+            session.sessionPreset = .photo
         }
         
         // 配置相机输入
