@@ -1,6 +1,5 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import '../controls/filter_control.dart';
 import '../services/native_camera_service.dart';
 
 /// 全局相机状态管理器
@@ -25,10 +24,10 @@ class CameraStateManager extends ChangeNotifier {
       ValueNotifier<double>(1.0);
   double _minZoomLevel = 1.0;
   double _maxZoomLevel = 3.0;
-  bool _showGridLines = false;
+  bool _showGridLines = false; // 确保默认关闭网格线
   String _currentAspectRatio = '4:3';
-  FilterType _currentFilter = FilterType.none;
-  bool _showFilterSelector = false;
+  bool _isAspectRatioControlExpanded = false; // 拍摄比例控制面板是否展开
+  bool _isExposureControlExpanded = false; // 曝光控制面板是否展开
   double _baseScaleLevel = 1.0;
   bool _isCameraChanging = false;
   Map<String, dynamic> _cameraCapabilities = {};
@@ -52,8 +51,8 @@ class CameraStateManager extends ChangeNotifier {
   double get maxZoomLevel => _maxZoomLevel;
   bool get showGridLines => _showGridLines;
   String get currentAspectRatio => _currentAspectRatio;
-  FilterType get currentFilter => _currentFilter;
-  bool get showFilterSelector => _showFilterSelector;
+  bool get isAspectRatioControlExpanded => _isAspectRatioControlExpanded;
+  bool get isExposureControlExpanded => _isExposureControlExpanded;
   double get baseScaleLevel => _baseScaleLevel;
   bool get isCameraChanging => _isCameraChanging;
   Map<String, dynamic> get cameraCapabilities => _cameraCapabilities;
@@ -115,6 +114,7 @@ class CameraStateManager extends ChangeNotifier {
 
   set showGridLines(bool value) {
     _showGridLines = value;
+    debugPrint('网格线显示状态切换为: ${_showGridLines ? '开启' : '关闭'}');
     notifyListeners();
   }
 
@@ -123,13 +123,21 @@ class CameraStateManager extends ChangeNotifier {
     notifyListeners();
   }
 
-  set currentFilter(FilterType value) {
-    _currentFilter = value;
+  set isAspectRatioControlExpanded(bool value) {
+    _isAspectRatioControlExpanded = value;
+    // 确保同一时间只有一个控制面板展开
+    if (value) {
+      _isExposureControlExpanded = false;
+    }
     notifyListeners();
   }
 
-  set showFilterSelector(bool value) {
-    _showFilterSelector = value;
+  set isExposureControlExpanded(bool value) {
+    _isExposureControlExpanded = value;
+    // 确保同一时间只有一个控制面板展开
+    if (value) {
+      _isAspectRatioControlExpanded = false;
+    }
     notifyListeners();
   }
 
@@ -230,12 +238,7 @@ class CameraStateManager extends ChangeNotifier {
   // 切换网格线显示
   void toggleGridLines() {
     _showGridLines = !_showGridLines;
-    notifyListeners();
-  }
-
-  // 切换滤镜选择器显示
-  void toggleFilterSelector() {
-    _showFilterSelector = !_showFilterSelector;
+    debugPrint('网格线显示状态切换为: ${_showGridLines ? '开启' : '关闭'}');
     notifyListeners();
   }
 
@@ -467,8 +470,15 @@ class CameraStateManager extends ChangeNotifier {
       final cameraController =
           NativeCameraService.instance.getGlobalCameraController();
       if (cameraController != null) {
-        // 这里需要在NativeCameraController中添加设置曝光的方法
-        // 暂时只更新状态
+        // 调用原生方法设置曝光值
+        final success = await cameraController.setExposureLevel(value);
+        if (success) {
+          debugPrint('设置曝光值成功: $value');
+        } else {
+          debugPrint('设置曝光值失败');
+        }
+
+        // 无论原生调用是否成功，更新本地状态
         _currentExposureValue = value;
         notifyListeners();
       }
@@ -518,7 +528,6 @@ class CameraStateManager extends ChangeNotifier {
     currentZoomLevelNotifier.value = _currentZoomLevel;
     _showGridLines = false;
     _currentAspectRatio = '4:3';
-    _currentFilter = FilterType.none;
     _currentExposureValue = 0.0;
 
     // 应用设置到相机

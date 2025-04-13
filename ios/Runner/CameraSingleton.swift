@@ -334,14 +334,8 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     
     /// 设置对焦点
     func setFocusPoint(_ point: CGPoint, completion: @escaping (Bool, String?) -> Void) {
-        guard let device = currentDevice else {
-            completion(false, "没有活动的相机设备")
-            return
-        }
-        
-        // 确保设备支持对焦点设置
-        guard device.isFocusPointOfInterestSupported else {
-            completion(false, "设备不支持对焦点设置")
+        guard isInitialized, isRunning, let device = currentDevice else {
+            completion(false, "相机未初始化或未运行")
             return
         }
         
@@ -370,6 +364,57 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             completion(true, nil)
         } catch {
             completion(false, "设置对焦点失败: \(error.localizedDescription)")
+        }
+    }
+    
+    /// 设置曝光级别
+    func setExposureLevel(_ value: Double, completion: @escaping (Bool, String?) -> Void) {
+        guard isInitialized, isRunning, let device = currentDevice else {
+            completion(false, "相机未初始化或未运行")
+            return
+        }
+        
+        do {
+            try device.lockForConfiguration()
+            
+            // iOS中曝光补偿范围通常是-8到8，我们需要将-2到2的范围映射到iOS的范围
+            if device.isExposureModeSupported(.custom) {
+                // 将-2到2范围映射到设备支持的曝光补偿范围
+                let minExposure = Float(device.minExposureTargetBias)
+                let maxExposure = Float(device.maxExposureTargetBias)
+                let normalizedValue = Float((value + 2.0) / 4.0) // 转换为0-1范围
+                let scaledValue = minExposure + normalizedValue * (maxExposure - minExposure)
+                
+                // 设置曝光偏移
+                device.setExposureTargetBias(scaledValue, completionHandler: nil)
+                
+                // 发送曝光更改事件
+                sendEvent(type: "exposureChanged", data: [
+                    "exposureValue": value,
+                    "success": true
+                ])
+            } else {
+                // 如果不支持自定义曝光，尝试使用自动曝光
+                if device.isExposureModeSupported(.autoExpose) {
+                    device.exposureMode = .autoExpose
+                    
+                    // 发送曝光更改事件，但告知客户端不支持精确曝光设置
+                    sendEvent(type: "exposureChanged", data: [
+                        "exposureValue": 0.0, // 默认为0（中间值）
+                        "success": true,
+                        "message": "设备不支持自定义曝光，已设置为自动曝光"
+                    ])
+                } else {
+                    device.unlockForConfiguration()
+                    completion(false, "设备不支持曝光控制")
+                    return
+                }
+            }
+            
+            device.unlockForConfiguration()
+            completion(true, nil)
+        } catch {
+            completion(false, "设置曝光级别失败: \(error.localizedDescription)")
         }
     }
     

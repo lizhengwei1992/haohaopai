@@ -163,12 +163,6 @@ import AVFoundation
       zoomOptions.append(2.0) // 长焦2x
     }
     
-    // 支持的滤镜列表
-    let supportedFilters = [
-      "none", "mono", "noir", "fade", "chrome", "process", 
-      "transfer", "instant", "sepia"
-    ]
-    
     // 支持的纵横比
     let supportedRatios = ["4:3", "1:1", "16:9"]
     
@@ -178,7 +172,6 @@ import AVFoundation
     capabilities["hasUltraWide"] = hasUltraWide
     capabilities["hasTelephoto"] = hasTelephoto
     capabilities["allZoomOptions"] = zoomOptions
-    capabilities["supportedFilters"] = supportedFilters
     capabilities["supportedRatios"] = supportedRatios
     
     result(capabilities)

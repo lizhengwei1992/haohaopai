@@ -9,12 +9,46 @@ import '../layout/layout_params.dart';
 import '../controls/flash_control.dart';
 import '../controls/exposure_control.dart';
 import '../controls/aspect_ratio_control.dart';
-import '../controls/filter_control.dart';
+import '../controls/grid_control.dart';
 import '../controls/camera_switch_control.dart';
 import '../controls/zoom_control.dart';
 import '../actions/capture_action.dart';
 import '../actions/album_action.dart';
 import '../actions/guide_action.dart';
+
+// 网格线绘制器
+class GridPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.white.withOpacity(0.5)
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke;
+
+    // 绘制水平线(2条，分成3份)
+    final double cellHeight = size.height / 3;
+    for (int i = 1; i < 3; i++) {
+      canvas.drawLine(
+        Offset(0, cellHeight * i),
+        Offset(size.width, cellHeight * i),
+        paint,
+      );
+    }
+
+    // 绘制垂直线(2条，分成3份)
+    final double cellWidth = size.width / 3;
+    for (int i = 1; i < 3; i++) {
+      canvas.drawLine(
+        Offset(cellWidth * i, 0),
+        Offset(cellWidth * i, size.height),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
 
 class CameraScreen extends StatefulWidget {
   const CameraScreen({Key? key}) : super(key: key);
@@ -302,9 +336,7 @@ class _CameraScreenState extends State<CameraScreen>
               // 主要内容区域，包含相机预览和大部分UI元素
               GestureDetector(
                 onTap: () {
-                  if (_stateManager.showFilterSelector) {
-                    _stateManager.showFilterSelector = false;
-                  }
+                  // 移除滤镜选择器相关代码
                 },
                 child: Stack(
                   children: [
@@ -395,7 +427,24 @@ class _CameraScreenState extends State<CameraScreen>
                                                   // 同时显示一个半透明覆盖层，保持接收手势事件
                                                   Container(
                                                     color: Colors.transparent,
-                                                  )
+                                                  ),
+
+                                                  // 添加网格线
+                                                  ListenableBuilder(
+                                                    listenable: _stateManager,
+                                                    builder: (context, _) {
+                                                      return _stateManager
+                                                              .showGridLines
+                                                          ? CustomPaint(
+                                                              painter:
+                                                                  GridPainter(),
+                                                              size:
+                                                                  Size.infinite,
+                                                            )
+                                                          : const SizedBox
+                                                              .shrink();
+                                                    },
+                                                  ),
                                                 ],
                                               ),
                                             );
@@ -418,16 +467,34 @@ class _CameraScreenState extends State<CameraScreen>
                                           }
                                         },
                                       )
-                                    : Container(
-                                        color: const Color(0xFF1A1A1A),
-                                        child: const Center(
-                                          child: Text(
-                                            '相机预览区域',
-                                            style: TextStyle(
-                                                color: Colors.white60,
-                                                fontSize: 16),
+                                    : Stack(
+                                        fit: StackFit.expand,
+                                        children: [
+                                          Container(
+                                            color: const Color(0xFF1A1A1A),
+                                            child: const Center(
+                                              child: Text(
+                                                '相机预览区域',
+                                                style: TextStyle(
+                                                    color: Colors.white60,
+                                                    fontSize: 16),
+                                              ),
+                                            ),
                                           ),
-                                        ),
+
+                                          // 添加网格线
+                                          ListenableBuilder(
+                                            listenable: _stateManager,
+                                            builder: (context, _) {
+                                              return _stateManager.showGridLines
+                                                  ? CustomPaint(
+                                                      painter: GridPainter(),
+                                                      size: Size.infinite,
+                                                    )
+                                                  : const SizedBox.shrink();
+                                            },
+                                          ),
+                                        ],
                                       ),
                               ),
 
@@ -457,31 +524,34 @@ class _CameraScreenState extends State<CameraScreen>
                       ),
                     ),
 
-                    // 顶部控制栏 - 返回按钮（移到左上角）
-                    Positioned(
-                      top: _layoutParams.topPadding,
-                      left: 16, // 改为左侧
-                      child: GestureDetector(
-                        onTap: () {
-                          Navigator.pop(context);
-                        },
-                        child: Container(
-                          width: 36,
-                          height: 36,
-                          decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.3),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Center(
-                            child: Icon(
-                              Icons.arrow_back_ios,
-                              color: Colors.white,
-                              size: 18,
+                    // 可点击透明覆盖层，用于关闭展开的控制面板
+                    if (_stateManager.isExposureControlExpanded ||
+                        _stateManager.isAspectRatioControlExpanded)
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          ignoring: !(_stateManager.isExposureControlExpanded ||
+                              _stateManager.isAspectRatioControlExpanded),
+                          child: GestureDetector(
+                            onTap: () {
+                              // 点击空白处关闭控制面板
+                              setState(() {
+                                if (_stateManager.isExposureControlExpanded) {
+                                  _stateManager.isExposureControlExpanded =
+                                      false;
+                                }
+                                if (_stateManager
+                                    .isAspectRatioControlExpanded) {
+                                  _stateManager.isAspectRatioControlExpanded =
+                                      false;
+                                }
+                              });
+                            },
+                            child: Container(
+                              color: Colors.transparent,
                             ),
                           ),
                         ),
                       ),
-                    ),
 
                     // 缩放控制（相机预览框下沿向上10px）
                     Positioned(
@@ -496,16 +566,24 @@ class _CameraScreenState extends State<CameraScreen>
                       top: previewParams.cameraControlsY,
                       left: 0,
                       right: 0,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: const [
-                          FlashControl(),
-                          ExposureControl(),
-                          AspectRatioControl(),
-                          FilterControl(),
-                          CameraSwitchControl(),
-                        ],
-                      ),
+                      child: _stateManager.isAspectRatioControlExpanded
+                          // 当拍摄比例控制面板展开时，只显示该控件
+                          ? const AspectRatioControl()
+                          // 当曝光控制面板展开时，只显示该控件
+                          : _stateManager.isExposureControlExpanded
+                              ? const ExposureControl()
+                              // 正常状态下显示所有控制按钮
+                              : Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceEvenly,
+                                  children: const [
+                                    FlashControl(),
+                                    ExposureControl(),
+                                    AspectRatioControl(),
+                                    GridControl(),
+                                    CameraSwitchControl(),
+                                  ],
+                                ),
                     ),
 
                     // 底部拍照按钮区域（相机控制按钮下沿向下10px）
@@ -546,15 +624,6 @@ class _CameraScreenState extends State<CameraScreen>
                   ],
                 ),
               ),
-
-              // 滤镜选择器 - 单独放在外层Stack中，使其能够接收点击事件
-              if (_stateManager.showFilterSelector)
-                Positioned(
-                  top: previewParams.bottomPosition + 10,
-                  left: 0,
-                  right: 0,
-                  child: const FilterSelector(),
-                ),
             ],
           ),
         );

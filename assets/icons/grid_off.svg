@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="54" height="54" viewBox="0 0 54 54" fill="none">
+  <!-- 外圈 -->
+  <circle cx="27" cy="27" r="25" stroke="white" stroke-width="2"/>
+
+  <!-- 垂直线（超暗 + 更细） -->
+  <line x1="18" y1="2" x2="18" y2="52" stroke="#333333" stroke-width="1"/>
+  <line x1="36" y1="2" x2="36" y2="52" stroke="#333333" stroke-width="1"/>
+
+  <!-- 水平线（超暗 + 更细） -->
+  <line x1="2" y1="18" x2="52" y2="18" stroke="#333333" stroke-width="1"/>
+  <line x1="2" y1="36" x2="52" y2="36" stroke="#333333" stroke-width="1"/>
+
+  <!-- 超粗的白色 X -->
+  <line x1="10" y1="10" x2="44" y2="44" stroke="white" stroke-width="5"/>
+  <line x1="44" y1="10" x2="10" y2="44" stroke="white" stroke-width="5"/>
+</svg>

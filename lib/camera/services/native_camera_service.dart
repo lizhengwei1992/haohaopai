@@ -433,6 +433,20 @@ class NativeCameraController {
     }
   }
 
+  /// 设置曝光级别
+  Future<bool> setExposureLevel(double value) async {
+    try {
+      final bool success = await _methodChannel.invokeMethod(
+        'setExposureLevel',
+        {'exposureLevel': value},
+      );
+      return success;
+    } on PlatformException catch (e) {
+      debugPrint('设置曝光级别时出错: ${e.message}');
+      return false;
+    }
+  }
+
   /// 设置对焦点
   Future<bool> setFocusPoint(double x, double y) async {
     try {

@@ -220,6 +220,21 @@ class NativeCameraView: NSObject, FlutterPlatformView, FlutterStreamHandler {
                 result(FlutterError(code: "INVALID_ARGS", message: "无效的参数", details: nil))
             }
             
+        case "setExposureLevel":
+            if let args = call.arguments as? [String: Any], 
+               let exposureLevel = args["exposureLevel"] as? Double {
+                
+                CameraSingleton.shared.setExposureLevel(exposureLevel) { success, error in
+                    if success {
+                        result(true)
+                    } else {
+                        result(FlutterError(code: "EXPOSURE_FAILED", message: error ?? "设置曝光级别失败", details: nil))
+                    }
+                }
+            } else {
+                result(FlutterError(code: "INVALID_ARGS", message: "无效的参数", details: nil))
+            }
+            
         case "isFrontCamera":
             // 这个方法需要在CameraSingleton中添加，返回当前是否为前置相机
             result(CameraSingleton.shared.isFrontCamera())
