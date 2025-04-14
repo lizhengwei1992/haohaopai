@@ -419,6 +419,71 @@ class NativeCameraController {
     }
   }
 
+  /// 设置系统级缩放效果（支持超广角相机）
+  Future<bool> setSystemLikeZoom(double zoomLevel) async {
+    debugPrint('调用setSystemLikeZoom: $zoomLevel');
+
+    // 小于1.0表示超广角，可能需要特殊处理
+    final bool isUltraWide = zoomLevel < 1.0;
+
+    // 尝试次数
+    int attempts = 0;
+    const maxAttempts = 2;
+
+    while (attempts < maxAttempts) {
+      attempts++;
+      debugPrint('尝试设置系统级缩放 (第$attempts次): $zoomLevel');
+
+      try {
+        final bool success = await _methodChannel.invokeMethod(
+          'setSystemLikeZoom',
+          {'zoomLevel': zoomLevel},
+        );
+
+        if (success) {
+          debugPrint('系统级缩放设置成功: $zoomLevel');
+          return true;
+        } else {
+          debugPrint('系统级缩放设置失败，API返回false');
+
+          // 如果是超广角模式且第一次尝试失败，短暂等待后重试
+          if (isUltraWide && attempts < maxAttempts) {
+            debugPrint('超广角模式设置失败，等待后重试');
+            await Future.delayed(const Duration(milliseconds: 500));
+            continue;
+          }
+
+          return false;
+        }
+      } on PlatformException catch (e) {
+        debugPrint('设置系统级缩放效果时出错: ${e.message}');
+
+        // 如果是超广角模式且第一次尝试失败，短暂等待后重试
+        if (isUltraWide && attempts < maxAttempts) {
+          debugPrint('超广角模式设置失败(错误)，等待后重试');
+          await Future.delayed(const Duration(milliseconds: 500));
+          continue;
+        }
+
+        return false;
+      } catch (e) {
+        debugPrint('设置系统级缩放效果时发生未知错误: $e');
+
+        // 如果是超广角模式且第一次尝试失败，短暂等待后重试
+        if (isUltraWide && attempts < maxAttempts) {
+          debugPrint('超广角模式设置失败(未知错误)，等待后重试');
+          await Future.delayed(const Duration(milliseconds: 500));
+          continue;
+        }
+
+        return false;
+      }
+    }
+
+    // 如果所有尝试都失败，返回false
+    return false;
+  }
+
   /// 设置闪光灯模式
   Future<bool> setFlashMode(String mode) async {
     try {
@@ -443,20 +508,6 @@ class NativeCameraController {
       return success;
     } on PlatformException catch (e) {
       debugPrint('设置曝光级别时出错: ${e.message}');
-      return false;
-    }
-  }
-
-  /// 设置对焦点
-  Future<bool> setFocusPoint(double x, double y) async {
-    try {
-      final bool success = await _methodChannel.invokeMethod(
-        'setFocusPoint',
-        {'x': x, 'y': y},
-      );
-      return success;
-    } on PlatformException catch (e) {
-      debugPrint('设置对焦点时出错: ${e.message}');
       return false;
     }
   }
@@ -589,6 +640,20 @@ class _NativeCameraViewState extends State<NativeCameraView>
       case 'zoomChanged':
         debugPrint('相机事件: 缩放变化 - ${event['zoomFactor']}');
         break;
+      case 'previewLayerUpdated':
+        debugPrint('相机事件: 预览层更新 (Flutter 端不主动重启预览)');
+        // 注释掉重启预览的调用
+        // WidgetsBinding.instance.addPostFrameCallback((_) {
+        //   _restartPreview();
+        // });
+        break;
+      case 'cameraTypeChanged':
+        debugPrint('相机事件: 相机类型变化 - ${event['deviceType']} (Flutter 端不主动重启预览)');
+        // 注释掉重启预览的调用
+        // WidgetsBinding.instance.addPostFrameCallback((_) {
+        //   _restartPreview();
+        // });
+        break;
       default:
         debugPrint('相机事件: $type - $event');
         break;
@@ -608,6 +673,29 @@ class _NativeCameraViewState extends State<NativeCameraView>
       await _controller?.resumePreview();
     } catch (e) {
       debugPrint('恢复相机时出错: $e');
+    }
+  }
+
+  // 重新启动预览的方法 (保留，但不再由上述事件触发)
+  Future<void> _restartPreview() async {
+    try {
+      debugPrint('尝试重启相机预览 (手动或特殊情况调用)');
+      // 停止当前预览
+      await _controller?.stopPreview();
+
+      // 短暂延迟，让相机资源释放
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      // 重新初始化并启动预览
+      final initialized = await _controller?.initialize() ?? false;
+      if (initialized) {
+        await _controller?.startPreview();
+        debugPrint('相机预览重启成功');
+      } else {
+        debugPrint('相机重新初始化失败');
+      }
+    } catch (e) {
+      debugPrint('重启相机预览时出错: $e');
     }
   }
 

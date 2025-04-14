@@ -25,11 +25,6 @@ class CameraController {
     await _nativeCameraController.resumePreview();
   }
 
-  /// 设置焦点点
-  Future<bool> setFocusPoint(double x, double y) async {
-    return _nativeCameraController.setFocusPoint(x, y);
-  }
-
   /// 设置缩放级别
   Future<bool> setZoomLevel(double zoomLevel) async {
     return _nativeCameraController.setZoomLevel(zoomLevel);

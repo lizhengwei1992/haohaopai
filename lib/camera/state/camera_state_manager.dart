@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../services/native_camera_service.dart';
+import 'dart:async';
 
 /// 全局相机状态管理器
 class CameraStateManager extends ChangeNotifier {
@@ -35,11 +36,6 @@ class CameraStateManager extends ChangeNotifier {
   double _minExposureValue = -2.0;
   double _maxExposureValue = 2.0;
 
-  // 焦点相关
-  Offset? _focusPoint;
-  bool _showFocusPoint = false;
-  bool _focusSuccess = false;
-
   // Getters
   bool get isCameraInitialized => _isCameraInitialized;
   String get currentCameraType => _currentCameraType;
@@ -56,9 +52,6 @@ class CameraStateManager extends ChangeNotifier {
   double get baseScaleLevel => _baseScaleLevel;
   bool get isCameraChanging => _isCameraChanging;
   Map<String, dynamic> get cameraCapabilities => _cameraCapabilities;
-  Offset? get focusPoint => _focusPoint;
-  bool get showFocusPoint => _showFocusPoint;
-  bool get focusSuccess => _focusSuccess;
   double get currentExposureValue => _currentExposureValue;
   double get minExposureValue => _minExposureValue;
   double get maxExposureValue => _maxExposureValue;
@@ -156,21 +149,6 @@ class CameraStateManager extends ChangeNotifier {
     notifyListeners();
   }
 
-  set focusPoint(Offset? value) {
-    _focusPoint = value;
-    notifyListeners();
-  }
-
-  set showFocusPoint(bool value) {
-    _showFocusPoint = value;
-    notifyListeners();
-  }
-
-  set focusSuccess(bool value) {
-    _focusSuccess = value;
-    notifyListeners();
-  }
-
   set currentExposureValue(double value) {
     if (value < _minExposureValue) {
       value = _minExposureValue;
@@ -188,20 +166,6 @@ class CameraStateManager extends ChangeNotifier {
 
   set maxExposureValue(double value) {
     _maxExposureValue = value;
-    notifyListeners();
-  }
-
-  // 更新焦点
-  void updateFocus(Offset? point, bool show, bool success) {
-    _focusPoint = point;
-    _showFocusPoint = show;
-    _focusSuccess = success;
-    notifyListeners();
-  }
-
-  // 隐藏焦点点
-  void hideFocusPoint() {
-    _showFocusPoint = false;
     notifyListeners();
   }
 
@@ -496,20 +460,54 @@ class CameraStateManager extends ChangeNotifier {
       value = _maxZoomLevel;
     }
 
+    // 判断是否切换相机类型
+    bool isCameraTypeChange = (value < 1.0 && _currentZoomLevel >= 1.0) ||
+        (_currentZoomLevel < 1.0 && value >= 1.0);
+
+    if (isCameraTypeChange) {
+      // 如果正在切换，则忽略新的请求以防止冲突
+      if (_isCameraChanging) {
+        debugPrint('相机正在切换中，忽略新的缩放请求: $value');
+        return;
+      }
+      // 设置相机变化状态
+      _isCameraChanging = true;
+      notifyListeners();
+      debugPrint('相机类型变换开始: 目标缩放 $value');
+    }
+
     try {
       final cameraController =
           NativeCameraService.instance.getGlobalCameraController();
       if (cameraController != null) {
-        final success = await cameraController.setZoomLevel(value);
+        // 直接调用原生方法，不再使用超时
+        final success = await cameraController.setSystemLikeZoom(value);
+
         if (success) {
+          // 注意：只在原生调用成功时更新本地缩放值
+          // isCameraChanging 状态由原生事件回调重置
           _currentZoomLevel = value;
           currentZoomLevelNotifier.value = value;
           notifyListeners();
+          debugPrint('原生setSystemLikeZoom调用成功，请求缩放: $value');
+        } else {
+          debugPrint('原生setSystemLikeZoom调用失败');
+          // 如果原生调用失败，重置 isCameraChanging 状态
+          if (isCameraTypeChange) {
+            _isCameraChanging = false;
+            notifyListeners();
+          }
         }
       }
     } catch (e) {
       debugPrint('设置缩放级别时出错: $e');
+      // 出错时也重置 isCameraChanging 状态
+      if (isCameraTypeChange) {
+        _isCameraChanging = false;
+        notifyListeners();
+      }
     }
+    // finally 块被移除，isCameraChanging 由事件或错误处理重置
   }
 
   /// 设置拍摄比例
@@ -535,7 +533,7 @@ class CameraStateManager extends ChangeNotifier {
         NativeCameraService.instance.getGlobalCameraController();
     if (cameraController != null) {
       await cameraController.setFlashMode(_flashMode);
-      await cameraController.setZoomLevel(_currentZoomLevel);
+      await cameraController.setSystemLikeZoom(_currentZoomLevel);
     }
 
     notifyListeners();

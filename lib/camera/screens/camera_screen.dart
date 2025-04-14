@@ -176,25 +176,6 @@ class _CameraScreenState extends State<CameraScreen>
         debugPrint('相机事件通道连接成功: ${event['message']}');
         break;
 
-      case 'focusChanged':
-        if (event['success'] == true) {
-          final x = event['x'] as double?;
-          final y = event['y'] as double?;
-
-          if (x != null && y != null) {
-            // 更新焦点状态
-            _stateManager.updateFocus(Offset(x, y), true, true);
-
-            // 3秒后隐藏对焦点
-            Future.delayed(const Duration(seconds: 3), () {
-              if (mounted) {
-                _stateManager.hideFocusPoint();
-              }
-            });
-          }
-        }
-        break;
-
       case 'zoomChanged':
         final zoom = event['zoomFactor'] as double?;
         if (zoom != null && mounted) {
@@ -211,6 +192,15 @@ class _CameraScreenState extends State<CameraScreen>
         }
         break;
 
+      case 'cameraTypeChanged':
+        debugPrint('相机事件: 相机类型变化 - ${event['deviceType']} (Flutter 端不主动重启预览)');
+        // 重置 isCameraChanging 状态
+        if (_stateManager.isCameraChanging) {
+          _stateManager.isCameraChanging = false;
+          debugPrint('原生相机类型切换完成，重置isCameraChanging状态');
+        }
+        break;
+
       case 'cameraSwitched':
         final position = event['position'] as String?;
         debugPrint('收到相机切换事件：position=$position');
@@ -221,8 +211,15 @@ class _CameraScreenState extends State<CameraScreen>
           debugPrint('原生相机类型 $position 映射到 $mappedPosition');
 
           _stateManager.currentCameraType = mappedPosition;
-          _stateManager.isProcessingCameraChange = false;
-          debugPrint('相机切换完成: $mappedPosition');
+          // 确保前后置切换也重置状态
+          if (_stateManager.isProcessingCameraChange) {
+            _stateManager.isProcessingCameraChange = false;
+            debugPrint('前后摄像头切换完成，重置isProcessingCameraChange状态');
+          } else if (_stateManager.isCameraChanging) {
+            // 如果是因为调用 switchCamera 触发的类型变化，也重置 isCameraChanging
+            _stateManager.isCameraChanging = false;
+            debugPrint('前后摄像头切换事件也重置isCameraChanging状态');
+          }
         }
         break;
 
@@ -233,37 +230,6 @@ class _CameraScreenState extends State<CameraScreen>
       default:
         debugPrint('未处理的相机事件类型: $type');
         break;
-    }
-  }
-
-  // 设置对焦点
-  void _setFocusPoint(Offset position, BoxConstraints constraints) {
-    if (_nativeCameraController != null) {
-      // 计算相对于相机视图的比例坐标 (0.0-1.0)
-      final double relativeX = position.dx / constraints.maxWidth;
-      final double relativeY = position.dy / constraints.maxHeight;
-
-      // 应用对焦
-      _nativeCameraController!
-          .setFocusPoint(relativeX, relativeY)
-          .then((success) {
-        if (success) {
-          _stateManager.updateFocus(position, true, true);
-
-          // 3秒后隐藏对焦点
-          Future.delayed(const Duration(seconds: 3), () {
-            _stateManager.hideFocusPoint();
-          });
-        }
-      });
-    } else {
-      // 模拟对焦点
-      _stateManager.updateFocus(position, true, true);
-
-      // 3秒后隐藏对焦点
-      Future.delayed(const Duration(seconds: 3), () {
-        _stateManager.hideFocusPoint();
-      });
     }
   }
 
@@ -355,33 +321,40 @@ class _CameraScreenState extends State<CameraScreen>
                             children: [
                               // 相机预览 - 使用原生相机或占位符表示
                               GestureDetector(
-                                onTapDown: (TapDownDetails details) {
-                                  // 获取点击位置
-                                  final RenderBox box =
-                                      context.findRenderObject() as RenderBox;
-                                  final Offset localPosition =
-                                      box.globalToLocal(details.globalPosition);
+                                // onTapDown 已恢复，现在再次注释掉以移除对焦功能
+                                // onTapDown: (TapDownDetails details) {
+                                //   // 获取点击位置
+                                //   final RenderBox box =
+                                //       context.findRenderObject() as RenderBox;
+                                //   final Offset localPosition =
+                                //       box.globalToLocal(details.globalPosition);
+                                //
+                                //   // 计算点击位置相对于预览框的偏移
+                                //   final Offset adjustedPosition = Offset(
+                                //       localPosition.dx,
+                                //       localPosition.dy -
+                                //           previewParams.topPosition);
+                                //
+                                //   // 设置对焦点
+                                //   _setFocusPoint(
+                                //       adjustedPosition,
+                                //       BoxConstraints(
+                                //           maxWidth: previewParams.width,
+                                //           maxHeight: previewParams.height));
+                                // },
 
-                                  // 计算点击位置相对于预览框的偏移
-                                  final Offset adjustedPosition = Offset(
-                                      localPosition.dx,
-                                      localPosition.dy -
-                                          previewParams.topPosition);
-
-                                  // 设置对焦点
-                                  _setFocusPoint(
-                                      adjustedPosition,
-                                      BoxConstraints(
-                                          maxWidth: previewParams.width,
-                                          maxHeight: previewParams.height));
-                                },
-
-                                // 添加手势缩放功能
+                                // 保留缩放手势功能
                                 onScaleStart: (details) {
                                   _stateManager.baseScaleLevel =
                                       _stateManager.currentZoomLevel;
                                 },
                                 onScaleUpdate: (details) {
+                                  // 增加判断：如果相机正在切换，则忽略缩放更新
+                                  if (_stateManager.isCameraChanging) {
+                                    debugPrint('相机正在切换，忽略本次缩放更新');
+                                    return;
+                                  }
+
                                   if (details.scale != 1.0) {
                                     // 计算新的缩放级别
                                     double newZoom =
@@ -397,127 +370,53 @@ class _CameraScreenState extends State<CameraScreen>
                                   }
                                 },
                                 onScaleEnd: (details) {
-                                  // 更新基础缩放级别为当前缩放级别
                                   _stateManager.baseScaleLevel =
                                       _stateManager.currentZoomLevel;
                                 },
 
-                                child: _useNativeCamera &&
-                                        _nativeCameraController != null
-                                    ? Builder(
-                                        builder: (context) {
-                                          try {
-                                            return Container(
-                                              color: Colors.black,
-                                              child: Stack(
-                                                fit: StackFit.expand,
-                                                children: [
-                                                  // 如果原生相机初始化成功，显示NativeCameraView
-                                                  if (Platform.isIOS)
-                                                    NativeCameraView(
-                                                      controller:
-                                                          _nativeCameraController,
-                                                      backgroundColor:
-                                                          const Color(
-                                                              0xFF1A1A1A),
-                                                      onCreated: () {
-                                                        _initializeNativeCamera();
-                                                      },
-                                                    ),
-                                                  // 同时显示一个半透明覆盖层，保持接收手势事件
-                                                  Container(
-                                                    color: Colors.transparent,
-                                                  ),
-
-                                                  // 添加网格线
-                                                  ListenableBuilder(
-                                                    listenable: _stateManager,
-                                                    builder: (context, _) {
-                                                      return _stateManager
-                                                              .showGridLines
-                                                          ? CustomPaint(
-                                                              painter:
-                                                                  GridPainter(),
-                                                              size:
-                                                                  Size.infinite,
-                                                            )
-                                                          : const SizedBox
-                                                              .shrink();
-                                                    },
-                                                  ),
-                                                ],
-                                              ),
-                                            );
-                                          } catch (e) {
-                                            debugPrint(
-                                                '创建NativeCameraView时发生错误: $e');
-                                            Future.microtask(
-                                                () => _switchToDefaultMode());
-                                            return Container(
-                                              color: const Color(0xFF1A1A1A),
-                                              child: const Center(
-                                                child: Text(
-                                                  '相机预览区域 (降级模式)',
-                                                  style: TextStyle(
-                                                      color: Colors.white60,
-                                                      fontSize: 16),
-                                                ),
-                                              ),
-                                            );
-                                          }
+                                child: Stack(
+                                  children: [
+                                    // 如果原生相机初始化成功，显示NativeCameraView
+                                    if (Platform.isIOS)
+                                      NativeCameraView(
+                                        controller: _nativeCameraController,
+                                        backgroundColor:
+                                            const Color(0xFF1A1A1A),
+                                        onCreated: () {
+                                          _initializeNativeCamera();
                                         },
-                                      )
-                                    : Stack(
-                                        fit: StackFit.expand,
-                                        children: [
-                                          Container(
-                                            color: const Color(0xFF1A1A1A),
-                                            child: const Center(
-                                              child: Text(
-                                                '相机预览区域',
-                                                style: TextStyle(
-                                                    color: Colors.white60,
-                                                    fontSize: 16),
-                                              ),
-                                            ),
-                                          ),
-
-                                          // 添加网格线
-                                          ListenableBuilder(
-                                            listenable: _stateManager,
-                                            builder: (context, _) {
-                                              return _stateManager.showGridLines
-                                                  ? CustomPaint(
-                                                      painter: GridPainter(),
-                                                      size: Size.infinite,
-                                                    )
-                                                  : const SizedBox.shrink();
-                                            },
-                                          ),
-                                        ],
                                       ),
-                              ),
-
-                              // 对焦点
-                              if (_stateManager.showFocusPoint &&
-                                  _stateManager.focusPoint != null)
-                                Positioned(
-                                  left: _stateManager.focusPoint!.dx - 40,
-                                  top: _stateManager.focusPoint!.dy - 40,
-                                  child: Container(
-                                    width: 80,
-                                    height: 80,
-                                    decoration: BoxDecoration(
-                                      border: Border.all(
-                                        color: _stateManager.focusSuccess
-                                            ? Colors.green
-                                            : Colors.yellow,
-                                        width: 2,
-                                      ),
-                                      borderRadius: BorderRadius.circular(40),
+                                    // 同时显示一个半透明覆盖层，保持接收手势事件
+                                    Container(
+                                      color: Colors.transparent,
                                     ),
-                                  ),
+
+                                    // 添加网格线
+                                    ListenableBuilder(
+                                      listenable: _stateManager,
+                                      builder: (context, _) {
+                                        return _stateManager.showGridLines
+                                            ? CustomPaint(
+                                                painter: GridPainter(),
+                                                size: Size.infinite,
+                                              )
+                                            : const SizedBox.shrink();
+                                      },
+                                    ),
+
+                                    // 在 NativeCameraView 上层添加加载指示器
+                                    if (_stateManager.isCameraChanging)
+                                      Positioned.fill(
+                                        child: Container(
+                                          color: Colors.black.withOpacity(0.5),
+                                          child: const Center(
+                                              child: CircularProgressIndicator(
+                                                  color: Colors.white)),
+                                        ),
+                                      ),
+                                  ],
                                 ),
+                              ),
                             ],
                           ),
                         ),

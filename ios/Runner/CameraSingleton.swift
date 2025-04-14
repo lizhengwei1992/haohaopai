@@ -25,6 +25,14 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     
     // 当前缩放状态
     private var currentZoomFactor: CGFloat = 1.0
+    // 当前相机类型
+    private var currentDeviceType: AVCaptureDevice.DeviceType = .builtInWideAngleCamera
+    // 缩放切换阈值
+    private var zoomThresholds: (wideToUltraWide: CGFloat, wideToTele: CGFloat) = (0.8, 2.7)
+    // 是否支持超广角相机
+    private var hasUltraWideCamera: Bool = false
+    // 是否支持长焦相机
+    private var hasTelephotoCamera: Bool = false
     
     // 事件发送器
     private var eventSink: FlutterEventSink?
@@ -288,6 +296,329 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         }
     }
     
+    /// 设置系统级缩放效果 (支持超广角相机)
+    func setSystemLikeZoom(_ zoomLevel: CGFloat, completion: @escaping (Bool, String?) -> Void) {
+        guard isInitialized, let session = captureSession else {
+            completion(false, "相机未初始化")
+            return
+        }
+        
+        // 确定目标相机类型
+        let targetDeviceType: AVCaptureDevice.DeviceType
+        if zoomLevel < 1.0 && hasUltraWideCamera {
+            if #available(iOS 13.0, *) {
+                targetDeviceType = .builtInUltraWideCamera
+            } else {
+                // iOS 13以下不支持超广角，回退到广角
+                targetDeviceType = .builtInWideAngleCamera
+            }
+        } else if zoomLevel >= 1.0 && zoomLevel < zoomThresholds.wideToTele {
+            targetDeviceType = .builtInWideAngleCamera
+        } else if zoomLevel >= zoomThresholds.wideToTele && hasTelephotoCamera {
+            targetDeviceType = .builtInTelephotoCamera
+        } else {
+            targetDeviceType = .builtInWideAngleCamera
+        }
+        
+        // 如果相机类型相同，只调整数字变焦
+        if targetDeviceType == currentDeviceType {
+            adjustDigitalZoomOnly(zoomLevel, completion: completion)
+            return
+        }
+        
+        // 记录当前会话状态
+        let wasRunning = isRunning
+        
+        // 使用主线程处理会话配置，避免线程安全问题
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else {
+                completion(false, "相机单例已被释放")
+                return
+            }
+            
+            // 如果相机正在运行，先停止会话
+            if wasRunning {
+                session.stopRunning()
+                self.isRunning = false
+            }
+            
+            // 使用beginConfiguration/commitConfiguration包裹所有配置更改
+            session.beginConfiguration()
+            
+            do {
+                // 查找指定类型的设备
+                let discoverySession = AVCaptureDevice.DiscoverySession(
+                    deviceTypes: [targetDeviceType],
+                    mediaType: .video,
+                    position: self.currentPosition
+                )
+                
+                guard let newDevice = discoverySession.devices.first else {
+                    session.commitConfiguration()
+                    print("[CameraSingleton] 找不到指定类型的相机设备: \(targetDeviceType)") // 日志
+                    
+                    // 恢复会话状态
+                    if wasRunning {
+                        session.startRunning()
+                        self.isRunning = true
+                    }
+                    
+                    completion(false, "找不到指定类型的相机设备")
+                    return
+                }
+                print("[CameraSingleton] 找到新设备: \(newDevice.localizedName)") // 日志
+                
+                // 保存当前输入输出
+                let currentInput = self.currentDeviceInput
+                let currentVideoOutput = self.videoDataOutput
+                let currentPhotoOutput = self.photoOutput
+                
+                // 移除当前输入
+                if let input = currentInput {
+                    session.removeInput(input)
+                    self.currentDeviceInput = nil
+                    print("[CameraSingleton] 已移除旧输入") // 日志
+                }
+                
+                // 创建新的输入
+                do {
+                    let newInput = try AVCaptureDeviceInput(device: newDevice)
+                    print("[CameraSingleton] 已创建新输入") // 日志
+                    
+                    // 添加新输入
+                    if session.canAddInput(newInput) {
+                        session.addInput(newInput)
+                        self.currentDeviceInput = newInput
+                        self.currentDevice = newDevice
+                        self.currentDeviceType = targetDeviceType
+                        print("[CameraSingleton] 已添加新输入到会话") // 日志
+                        
+                        // 设置缩放级别
+                        try newDevice.lockForConfiguration()
+                        
+                        // 计算有效的缩放值
+                        let effectiveZoom = self.calculateEffectiveZoom(forDeviceType: targetDeviceType, requestedZoom: zoomLevel)
+                        newDevice.videoZoomFactor = effectiveZoom
+                        self.currentZoomFactor = effectiveZoom
+                        
+                        // 配置自动对焦和曝光
+                        if newDevice.isFocusModeSupported(.continuousAutoFocus) {
+                            newDevice.focusMode = .continuousAutoFocus
+                        }
+                        
+                        if newDevice.isExposureModeSupported(.continuousAutoExposure) {
+                            newDevice.exposureMode = .continuousAutoExposure
+                        }
+                        
+                        newDevice.unlockForConfiguration()
+                        
+                        print("[CameraSingleton] 新设备配置完成，有效缩放: \(effectiveZoom)") // 日志
+                    } else {
+                        // 如果无法添加新输入，恢复旧输入
+                        if let input = currentInput {
+                            if session.canAddInput(input) {
+                                session.addInput(input)
+                                self.currentDeviceInput = input
+                            }
+                        }
+                        
+                        print("[CameraSingleton] 错误：无法添加新输入到会话") // 日志
+                        throw NSError(domain: "com.haohaopai.app", code: 1003, userInfo: [NSLocalizedDescriptionKey: "无法添加相机输入"])
+                    }
+                } catch {
+                    // 恢复旧输入
+                    if let input = currentInput {
+                        if session.canAddInput(input) {
+                            session.addInput(input)
+                            self.currentDeviceInput = input
+                        }
+                    }
+                    
+                    print("[CameraSingleton] 错误：创建或添加新相机输入失败: \(error)") // 日志
+                    session.commitConfiguration()
+                    
+                    // 恢复会话状态
+                    if wasRunning {
+                        session.startRunning()
+                        self.isRunning = true
+                    }
+                    
+                    completion(false, "创建新相机输入失败: \(error.localizedDescription)")
+                    return
+                }
+                
+                // 提交配置
+                session.commitConfiguration()
+                print("[CameraSingleton] 会话配置已提交") // 日志
+                
+                // 更新预览层
+                print("[CameraSingleton] 准备调用 recreatePreviewLayer") // 日志
+                self.recreatePreviewLayer()
+                
+                // 如果原来在运行，重新启动
+                if wasRunning {
+                    print("[CameraSingleton] 准备在后台线程重启会话") // 日志
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        session.startRunning()
+                        print("[CameraSingleton] 后台线程：会话已调用 startRunning") // 日志
+                        
+                        DispatchQueue.main.async {
+                            self.isRunning = true
+                            print("[CameraSingleton] 主线程：isRunning 设置为 true") // 日志
+                            // 检查会话实际运行状态
+                            let sessionActuallyRunning = session.isRunning // 在主线程检查
+                            print("[CameraSingleton] 主线程：检查会话实际状态: isRunning = \(sessionActuallyRunning)") // 日志
+                            
+                            // 发送缩放变化事件
+                            self.sendEvent(type: "zoomChanged", data: [
+                                "zoomFactor": zoomLevel,
+                                "deviceType": self.deviceTypeToString(targetDeviceType)
+                            ])
+                            
+                            // 发送相机类型变化事件
+                            self.sendEvent(type: "cameraTypeChanged", data: [
+                                "deviceType": self.deviceTypeToString(targetDeviceType)
+                            ])
+                            
+                            print("[CameraSingleton] 调用 completion(true, nil) (会话重启后)") // 日志
+                            completion(true, nil)
+                        }
+                    }
+                } else {
+                    print("[CameraSingleton] 调用 completion(true, nil) (会话未运行)") // 日志
+                    completion(true, nil)
+                }
+            } catch {
+                // 提交配置以结束配置会话
+                session.commitConfiguration()
+                
+                print("[CameraSingleton] 错误：切换相机类型时发生异常: \(error)") // 日志
+                
+                // 恢复会话状态
+                if wasRunning {
+                    session.startRunning()
+                    self.isRunning = true
+                }
+                
+                // 尝试在当前相机上调整数字变焦
+                self.adjustDigitalZoomOnly(zoomLevel, completion: completion)
+            }
+        }
+    }
+    
+    /// 重新创建预览层并通知客户端更新视图
+    private func recreatePreviewLayer() {
+        guard let session = captureSession else { 
+            print("[CameraSingleton] recreatePreviewLayer 失败：会话为空") // 日志
+            return 
+        }
+        print("[CameraSingleton] recreatePreviewLayer 开始") // 日志
+        
+        // 在主线程处理UI相关操作
+        DispatchQueue.main.async {
+            print("[CameraSingleton] recreatePreviewLayer - 主线程") // 日志
+            // 移除旧的预览层引用
+            if let oldLayer = self.previewLayer {
+                oldLayer.removeFromSuperlayer()
+                print("[CameraSingleton] recreatePreviewLayer - 旧预览层已移除") // 日志
+            }
+            
+            // 创建新的预览层
+            let newLayer = AVCaptureVideoPreviewLayer(session: session)
+            newLayer.videoGravity = .resizeAspectFill
+            print("[CameraSingleton] recreatePreviewLayer - 新预览层已创建，Session: \(newLayer.session?.description ?? "nil")") // 日志
+            
+            // 更新引用
+            self.previewLayer = newLayer
+            
+            // 发送预览层更新事件
+            print("[CameraSingleton] recreatePreviewLayer - 准备发送 previewLayerUpdated 事件") // 日志
+            self.sendEvent(type: "previewLayerUpdated", data: [:])
+            
+            // 延迟发送诊断信息
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                self.sendDiagnosticInfo()
+            }
+        }
+    }
+    
+    /// 仅调整数字变焦
+    private func adjustDigitalZoomOnly(_ zoomLevel: CGFloat, completion: ((Bool, String?) -> Void)? = nil) {
+        guard let device = currentDevice else {
+            completion?(false, "当前设备不可用")
+            return
+        }
+        
+        do {
+            try device.lockForConfiguration()
+            
+            // 计算有效的缩放值
+            let effectiveZoom = calculateEffectiveZoom(forDeviceType: currentDeviceType, requestedZoom: zoomLevel)
+            
+            // 确保缩放值在合法范围内
+            let zoom = min(max(effectiveZoom, device.minAvailableVideoZoomFactor), device.activeFormat.videoMaxZoomFactor)
+            device.videoZoomFactor = zoom
+            currentZoomFactor = zoom
+            
+            device.unlockForConfiguration()
+            
+            // 发送缩放变化事件
+            sendEvent(type: "zoomChanged", data: [
+                "zoomFactor": zoomLevel,
+                "deviceType": deviceTypeToString(currentDeviceType)
+            ])
+            
+            completion?(true, nil)
+        } catch {
+            completion?(false, "设置缩放级别失败: \(error.localizedDescription)")
+        }
+    }
+    
+    /// 计算特定设备类型的有效缩放值
+    private func calculateEffectiveZoom(forDeviceType deviceType: AVCaptureDevice.DeviceType, requestedZoom: CGFloat) -> CGFloat {
+        if #available(iOS 13.0, *) {
+            if deviceType == .builtInUltraWideCamera {
+                // 超广角相机: 0.5x-1x 范围
+                if requestedZoom < 1.0 {
+                    // 直接使用物理镜头，所以乘以2来匹配UI显示的0.5x效果
+                    return requestedZoom * 2.0
+                } else {
+                    return requestedZoom
+                }
+            }
+        }
+        
+        switch deviceType {
+        case .builtInWideAngleCamera:
+            // 广角相机：正常使用1.0开始
+            return requestedZoom
+        case .builtInTelephotoCamera:
+            // 长焦相机：通常是2x或3x，需要根据实际镜头调整数值
+            // 这里假设长焦是3x镜头，所以除以3来得到实际缩放因子
+            return requestedZoom / 3.0
+        default:
+            return requestedZoom
+        }
+    }
+    
+    /// 设备类型转字符串
+    private func deviceTypeToString(_ deviceType: AVCaptureDevice.DeviceType) -> String {
+        if #available(iOS 13.0, *) {
+            if deviceType == .builtInUltraWideCamera {
+                return "ultraWide"
+            }
+        }
+        
+        switch deviceType {
+        case .builtInWideAngleCamera:
+            return "wide"
+        case .builtInTelephotoCamera:
+            return "telephoto"
+        default:
+            return "unknown"
+        }
+    }
+    
     /// 设置闪光灯模式
     func setFlashMode(_ mode: String, completion: ((Bool, String?) -> Void)? = nil) {
         guard let device = currentDevice else {
@@ -329,41 +660,6 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         } else {
             print("设备不支持当前闪光灯模式")
             completion?(false, "设备不支持当前闪光灯模式")
-        }
-    }
-    
-    /// 设置对焦点
-    func setFocusPoint(_ point: CGPoint, completion: @escaping (Bool, String?) -> Void) {
-        guard isInitialized, isRunning, let device = currentDevice else {
-            completion(false, "相机未初始化或未运行")
-            return
-        }
-        
-        do {
-            try device.lockForConfiguration()
-            
-            // 设置对焦点
-            device.focusPointOfInterest = point
-            device.focusMode = .autoFocus
-            
-            // 设置曝光点
-            if device.isExposurePointOfInterestSupported {
-                device.exposurePointOfInterest = point
-                device.exposureMode = .autoExpose
-            }
-            
-            device.unlockForConfiguration()
-            
-            // 发送对焦更改事件
-            sendEvent(type: "focusChanged", data: [
-                "x": point.x,
-                "y": point.y,
-                "success": true
-            ])
-            
-            completion(true, nil)
-        } catch {
-            completion(false, "设置对焦点失败: \(error.localizedDescription)")
         }
     }
     
@@ -474,6 +770,17 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     
     /// 发送事件到Flutter
     func sendEvent(type: String, data: [String: Any] = [:]) {
+        // 处理特殊的事件类型
+        if type == "previewLayerUpdated" {
+            // 通过通知中心发送预览层更新事件
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("com.haohaopai.app.PreviewLayerUpdated"),
+                    object: nil
+                )
+            }
+        }
+        
         guard let sink = eventSink else {
             return
         }
@@ -517,6 +824,60 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         
         // 发送通信暂停事件
         sendEvent(type: "appStateChanged", data: ["state": "inactive"])
+    }
+    
+    /// 诊断当前相机状态
+    func diagnoseCameraState() -> [String: Any] {
+        var state: [String: Any] = [:]
+        
+        // 基本状态
+        state["isInitialized"] = isInitialized
+        state["isRunning"] = isRunning
+        state["currentPosition"] = currentPosition == .back ? "back" : "front"
+        
+        // 设备类型
+        var deviceTypeString = "unknown"
+        if #available(iOS 13.0, *), currentDeviceType == .builtInUltraWideCamera {
+            deviceTypeString = "ultraWide"
+        } else if currentDeviceType == .builtInWideAngleCamera {
+            deviceTypeString = "wide"
+        } else if currentDeviceType == .builtInTelephotoCamera {
+            deviceTypeString = "telephoto"
+        }
+        state["currentDeviceType"] = deviceTypeString
+        
+        // 缩放信息
+        state["currentZoomFactor"] = currentZoomFactor
+        state["hasUltraWideCamera"] = hasUltraWideCamera
+        state["hasTelephotoCamera"] = hasTelephotoCamera
+        
+        // 会话信息
+        if let session = captureSession {
+            state["sessionPreset"] = session.sessionPreset.rawValue
+            state["isSessionRunning"] = session.isRunning
+            state["inputCount"] = session.inputs.count
+            state["outputCount"] = session.outputs.count
+        } else {
+            state["session"] = "null"
+        }
+        
+        // 预览层信息
+        if let layer = previewLayer {
+            state["previewLayerBounds"] = "\(layer.bounds.width)x\(layer.bounds.height)"
+            state["previewLayerVideoGravity"] = layer.videoGravity.rawValue
+            state["previewLayerHasConnection"] = layer.connection != nil
+        } else {
+            state["previewLayer"] = "null"
+        }
+        
+        print("相机状态诊断: \(state)")
+        return state
+    }
+    
+    /// 发送相机状态诊断信息
+    func sendDiagnosticInfo() {
+        let diagnosticInfo = diagnoseCameraState()
+        sendEvent(type: "diagnosticInfo", data: diagnosticInfo)
     }
     
     // MARK: - 私有方法
@@ -589,6 +950,9 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             currentDeviceInput = nil
         }
         
+        // 检查设备支持能力
+        checkCameraCapabilities()
+        
         // 获取指定位置的相机
         guard let newCamera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position) else {
             throw NSError(domain: "com.haohaopai.app", code: 1002, userInfo: [NSLocalizedDescriptionKey: "找不到指定位置的相机"])
@@ -604,9 +968,62 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             currentDevice = newCamera
             currentPosition = position
             currentZoomFactor = 1.0 // 重置缩放
+            currentDeviceType = .builtInWideAngleCamera // 默认使用广角相机
         } else {
             throw NSError(domain: "com.haohaopai.app", code: 1003, userInfo: [NSLocalizedDescriptionKey: "无法添加相机输入到会话"])
         }
+    }
+    
+    /// 检查相机能力
+    private func checkCameraCapabilities() {
+        // 根据iOS版本确定设备类型列表
+        var deviceTypes: [AVCaptureDevice.DeviceType] = [.builtInWideAngleCamera, .builtInTelephotoCamera]
+        
+        // 仅在iOS 13及以上添加超广角相机
+        if #available(iOS 13.0, *) {
+            deviceTypes.append(.builtInUltraWideCamera)
+        }
+        
+        // 发现相机设备
+        let discoverySession = AVCaptureDevice.DiscoverySession(
+            deviceTypes: deviceTypes,
+            mediaType: .video,
+            position: currentPosition
+        )
+        
+        // 重置状态
+        hasUltraWideCamera = false
+        hasTelephotoCamera = false
+        
+        // 检查支持的相机类型
+        for device in discoverySession.devices {
+            if #available(iOS 13.0, *) {
+                if device.deviceType == .builtInUltraWideCamera {
+                    hasUltraWideCamera = true
+                    print("检测到超广角相机")
+                    continue
+                }
+            }
+            
+            switch device.deviceType {
+            case .builtInTelephotoCamera:
+                hasTelephotoCamera = true
+                print("检测到长焦相机")
+            default:
+                break
+            }
+        }
+        
+        // 根据设备能力调整缩放阈值
+        zoomThresholds = getOptimalSwitchPoints()
+    }
+    
+    /// 获取最佳切换点
+    private func getOptimalSwitchPoints() -> (wideToUltraWide: CGFloat, wideToTele: CGFloat) {
+        return (
+            wideToUltraWide: hasUltraWideCamera ? 0.8 : CGFloat.infinity,
+            wideToTele: hasTelephotoCamera ? 2.7 : CGFloat.infinity
+        )
     }
     
     /// 配置视频输出
