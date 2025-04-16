@@ -29,7 +29,12 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     private var currentDeviceType: AVCaptureDevice.DeviceType = .builtInWideAngleCamera
     // 缩放切换阈值
     private var zoomThresholds: (wideToUltraWide: CGFloat, wideToTele: CGFloat) = (0.8, 2.7)
-    // 是否支持超广角相机
+    
+    // 虚拟摄像头支持
+    private var hasVirtualDeviceSupport: Bool = false
+    private var virtualDeviceSwitchPoints: [CGFloat] = []
+    
+    // 多摄像头支持
     private var hasUltraWideCamera: Bool = false
     // 是否支持长焦相机
     private var hasTelephotoCamera: Bool = false
@@ -40,8 +45,19 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     // 初始化锁，防止多线程初始化冲突
     private let initializationLock = NSLock()
     
+    // 标记是否正在进行初始化过程
+    private var isInitializing = false
+    
     // 私有变量
     private var wasRunningBeforeBackground = false
+    
+    // 公共方法 - 检查相机是否已初始化
+    var isCameraInitialized: Bool {
+        return isInitialized
+    }
+    
+    // 表示相机是否已初始化
+    // var isInitialized = false
     
     // 私有构造函数确保单例模式
     private override init() {
@@ -53,7 +69,7 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     
     /// 检查相机是否已准备就绪
     func isCameraReady(_ result: FlutterResult) {
-        result(isInitialized)
+        result(isCameraInitialized)
     }
     
     /// 等待相机初始化完成
@@ -66,36 +82,43 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     }
     
     /// 初始化相机
-    func initializeCamera(result: @escaping FlutterResult) {
-        // 如果已经初始化，直接返回成功
-        if isInitialized {
-            result(true)
-            return
-        }
+    func initializeCamera(completionHandler: @escaping (Bool) -> Void) {
+        NSLog("CameraSingleton: 开始初始化相机")
         
-        // 加锁防止多线程初始化
+        // 使用锁确保线程安全
         initializationLock.lock()
         defer { initializationLock.unlock() }
         
-        // 再次检查（双重检查锁定模式）
+        // 如果相机已经初始化或正在初始化过程中，直接返回成功
         if isInitialized {
-            result(true)
+            NSLog("CameraSingleton: 相机已经初始化过，跳过初始化")
+            completionHandler(true)
             return
         }
+        
+        // 检查是否已经在初始化过程中
+        if isInitializing {
+            NSLog("CameraSingleton: 相机已经在初始化过程中，添加完成回调")
+            initializationCompletionHandlers.append(completionHandler)
+            return
+        }
+        
+        isInitializing = true
+        
+        // 清理任何已存在的会话
+        cleanupOldSession()
         
         // 检查相机权限
         checkCameraPermission { [weak self] hasPermission in
             guard let self = self else {
-                result(FlutterError(code: "UNAVAILABLE", 
-                                   message: "相机单例已被释放", 
-                                   details: nil))
+                self?.isInitializing = false
+                completionHandler(false)
                 return
             }
             
             if !hasPermission {
-                result(FlutterError(code: "PERMISSION_DENIED", 
-                                   message: "相机权限被拒绝", 
-                                   details: nil))
+                self.isInitializing = false
+                completionHandler(false)
                 self.notifyInitializationCompleted(success: false)
                 return
             }
@@ -103,21 +126,41 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             // 在后台线程设置相机
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
+                    // 确保我们有一个干净的captureSession
+                    if let oldSession = self.captureSession {
+                        // 停止当前会话
+                        if oldSession.isRunning {
+                            oldSession.stopRunning()
+                            self.isRunning = false
+                        }
+                        
+                        // 移除所有输入和输出
+                        for input in oldSession.inputs {
+                            oldSession.removeInput(input)
+                        }
+                        for output in oldSession.outputs {
+                            oldSession.removeOutput(output)
+                        }
+                    } else {
+                        // 如果没有会话，创建一个新的
+                        self.captureSession = AVCaptureSession()
+                    }
+                    
                     try self.setupCaptureSession()
                     self.isInitialized = true
                     
                     // 在主线程返回结果
                     DispatchQueue.main.async {
+                        self.isInitializing = false
                         self.notifyInitializationCompleted(success: true)
-                        result(true)
+                        completionHandler(true)
                     }
                 } catch {
                     // 在主线程返回错误
                     DispatchQueue.main.async {
+                        self.isInitializing = false
                         self.notifyInitializationCompleted(success: false)
-                        result(FlutterError(code: "SETUP_ERROR", 
-                                           message: "设置相机失败: \(error.localizedDescription)", 
-                                           details: nil))
+                        completionHandler(false)
                     }
                 }
             }
@@ -296,13 +339,49 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         }
     }
     
-    /// 设置系统级缩放效果 (支持超广角相机)
+    /// 设置系统级缩放效果 (支持虚拟摄像头和超广角相机)
     func setSystemLikeZoom(_ zoomLevel: CGFloat, completion: @escaping (Bool, String?) -> Void) {
-        guard isInitialized, let session = captureSession else {
-            completion(false, "相机未初始化")
+        guard isInitialized, let device = currentDevice else {
+            completion(false, "相机未初始化或设备不可用")
             return
         }
         
+        // 如果是虚拟摄像头(iOS 13+)，使用虚拟摄像头的无缝缩放功能
+        if #available(iOS 13.0, *), hasVirtualDeviceSupport && 
+            (device.deviceType == .builtInDualWideCamera || 
+             device.deviceType == .builtInTripleCamera || 
+             device.deviceType == .builtInDualCamera) {
+            
+            do {
+                try device.lockForConfiguration()
+                
+                // 确保缩放值在合法范围内
+                let minZoom = device.minAvailableVideoZoomFactor
+                let maxZoom = min(device.maxAvailableVideoZoomFactor, 10.0) // 限制最大缩放为10倍，提高用户体验
+                let constrainedZoom = min(max(zoomLevel, minZoom), maxZoom)
+                
+                // 使用更平滑的缩放变化 - 防止卡顿
+                device.ramp(toVideoZoomFactor: constrainedZoom, withRate: 4.0)
+                currentZoomFactor = constrainedZoom
+                
+                device.unlockForConfiguration()
+                
+                // 发送缩放变化事件
+                sendEvent(type: "virtualDeviceZoomChanged", data: [
+                    "zoomFactor": constrainedZoom,
+                    "isSmooth": true,
+                    "deviceType": "virtual" // 标记为虚拟设备
+                ])
+                
+                completion(true, nil)
+                return
+            } catch {
+                print("设置虚拟摄像头缩放失败: \(error.localizedDescription)")
+                // 如果失败，继续尝试传统方法
+            }
+        }
+        
+        // 如果没有虚拟摄像头支持或虚拟摄像头设置失败，使用传统的摄像头切换方法
         // 确定目标相机类型
         let targetDeviceType: AVCaptureDevice.DeviceType
         if zoomLevel < 1.0 && hasUltraWideCamera {
@@ -336,6 +415,11 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                 return
             }
             
+            guard let session = self.captureSession else {
+                completion(false, "相机会话不可用")
+                return
+            }
+            
             // 如果相机正在运行，先停止会话
             if wasRunning {
                 session.stopRunning()
@@ -355,7 +439,7 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                 
                 guard let newDevice = discoverySession.devices.first else {
                     session.commitConfiguration()
-                    print("[CameraSingleton] 找不到指定类型的相机设备: \(targetDeviceType)") // 日志
+                    print("[CameraSingleton] 找不到指定类型的相机设备: \(targetDeviceType)")
                     
                     // 恢复会话状态
                     if wasRunning {
@@ -366,24 +450,22 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                     completion(false, "找不到指定类型的相机设备")
                     return
                 }
-                print("[CameraSingleton] 找到新设备: \(newDevice.localizedName)") // 日志
+                print("[CameraSingleton] 找到新设备: \(newDevice.localizedName)")
                 
                 // 保存当前输入输出
                 let currentInput = self.currentDeviceInput
-                let currentVideoOutput = self.videoDataOutput
-                let currentPhotoOutput = self.photoOutput
                 
                 // 移除当前输入
                 if let input = currentInput {
                     session.removeInput(input)
                     self.currentDeviceInput = nil
-                    print("[CameraSingleton] 已移除旧输入") // 日志
+                    print("[CameraSingleton] 已移除旧输入")
                 }
                 
                 // 创建新的输入
                 do {
                     let newInput = try AVCaptureDeviceInput(device: newDevice)
-                    print("[CameraSingleton] 已创建新输入") // 日志
+                    print("[CameraSingleton] 已创建新输入")
                     
                     // 添加新输入
                     if session.canAddInput(newInput) {
@@ -391,14 +473,20 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                         self.currentDeviceInput = newInput
                         self.currentDevice = newDevice
                         self.currentDeviceType = targetDeviceType
-                        print("[CameraSingleton] 已添加新输入到会话") // 日志
+                        print("[CameraSingleton] 已添加新输入到会话")
                         
                         // 设置缩放级别
                         try newDevice.lockForConfiguration()
                         
                         // 计算有效的缩放值
                         let effectiveZoom = self.calculateEffectiveZoom(forDeviceType: targetDeviceType, requestedZoom: zoomLevel)
-                        newDevice.videoZoomFactor = effectiveZoom
+                        
+                        // 使用平滑的缩放变化
+                        if #available(iOS 13.0, *) {
+                            newDevice.ramp(toVideoZoomFactor: effectiveZoom, withRate: 4.0)
+                        } else {
+                            newDevice.videoZoomFactor = effectiveZoom
+                        }
                         self.currentZoomFactor = effectiveZoom
                         
                         // 配置自动对焦和曝光
@@ -412,7 +500,7 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                         
                         newDevice.unlockForConfiguration()
                         
-                        print("[CameraSingleton] 新设备配置完成，有效缩放: \(effectiveZoom)") // 日志
+                        print("[CameraSingleton] 新设备配置完成，有效缩放: \(effectiveZoom)")
                     } else {
                         // 如果无法添加新输入，恢复旧输入
                         if let input = currentInput {
@@ -422,7 +510,7 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                             }
                         }
                         
-                        print("[CameraSingleton] 错误：无法添加新输入到会话") // 日志
+                        print("[CameraSingleton] 错误：无法添加新输入到会话")
                         throw NSError(domain: "com.haohaopai.app", code: 1003, userInfo: [NSLocalizedDescriptionKey: "无法添加相机输入"])
                     }
                 } catch {
@@ -434,7 +522,7 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                         }
                     }
                     
-                    print("[CameraSingleton] 错误：创建或添加新相机输入失败: \(error)") // 日志
+                    print("[CameraSingleton] 错误：创建或添加新相机输入失败: \(error)")
                     session.commitConfiguration()
                     
                     // 恢复会话状态
@@ -449,25 +537,22 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                 
                 // 提交配置
                 session.commitConfiguration()
-                print("[CameraSingleton] 会话配置已提交") // 日志
+                print("[CameraSingleton] 会话配置已提交")
                 
                 // 更新预览层
-                print("[CameraSingleton] 准备调用 recreatePreviewLayer") // 日志
+                print("[CameraSingleton] 准备调用 recreatePreviewLayer")
                 self.recreatePreviewLayer()
                 
                 // 如果原来在运行，重新启动
                 if wasRunning {
-                    print("[CameraSingleton] 准备在后台线程重启会话") // 日志
+                    print("[CameraSingleton] 准备在后台线程重启会话")
                     DispatchQueue.global(qos: .userInitiated).async {
                         session.startRunning()
-                        print("[CameraSingleton] 后台线程：会话已调用 startRunning") // 日志
+                        print("[CameraSingleton] 后台线程：会话已调用 startRunning")
                         
                         DispatchQueue.main.async {
                             self.isRunning = true
-                            print("[CameraSingleton] 主线程：isRunning 设置为 true") // 日志
-                            // 检查会话实际运行状态
-                            let sessionActuallyRunning = session.isRunning // 在主线程检查
-                            print("[CameraSingleton] 主线程：检查会话实际状态: isRunning = \(sessionActuallyRunning)") // 日志
+                            print("[CameraSingleton] 主线程：isRunning 设置为 true")
                             
                             // 发送缩放变化事件
                             self.sendEvent(type: "zoomChanged", data: [
@@ -480,19 +565,19 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                                 "deviceType": self.deviceTypeToString(targetDeviceType)
                             ])
                             
-                            print("[CameraSingleton] 调用 completion(true, nil) (会话重启后)") // 日志
+                            print("[CameraSingleton] 调用 completion(true, nil) (会话重启后)")
                             completion(true, nil)
                         }
                     }
                 } else {
-                    print("[CameraSingleton] 调用 completion(true, nil) (会话未运行)") // 日志
+                    print("[CameraSingleton] 调用 completion(true, nil) (会话未运行)")
                     completion(true, nil)
                 }
             } catch {
                 // 提交配置以结束配置会话
                 session.commitConfiguration()
                 
-                print("[CameraSingleton] 错误：切换相机类型时发生异常: \(error)") // 日志
+                print("[CameraSingleton] 错误：切换相机类型时发生异常: \(error)")
                 
                 // 恢复会话状态
                 if wasRunning {
@@ -556,8 +641,17 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             let effectiveZoom = calculateEffectiveZoom(forDeviceType: currentDeviceType, requestedZoom: zoomLevel)
             
             // 确保缩放值在合法范围内
-            let zoom = min(max(effectiveZoom, device.minAvailableVideoZoomFactor), device.activeFormat.videoMaxZoomFactor)
-            device.videoZoomFactor = zoom
+            let minZoom = device.minAvailableVideoZoomFactor
+            let maxZoom = min(device.activeFormat.videoMaxZoomFactor, 10.0) // 限制最大缩放为10倍
+            let zoom = min(max(effectiveZoom, minZoom), maxZoom)
+            
+            // 使用更平滑的缩放变化
+            if #available(iOS 13.0, *) {
+                device.ramp(toVideoZoomFactor: zoom, withRate: 4.0)
+            } else {
+                device.videoZoomFactor = zoom
+            }
+            
             currentZoomFactor = zoom
             
             device.unlockForConfiguration()
@@ -645,7 +739,19 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         if device.hasFlash && device.isFlashAvailable && device.isFlashModeSupported(flashMode) {
             do {
                 try device.lockForConfiguration()
+                
+                // 设置闪光灯模式
                 device.flashMode = flashMode
+                
+                // 如果是虚拟摄像头，可能需要特殊处理
+                if #available(iOS 13.0, *), hasVirtualDeviceSupport && 
+                   (device.deviceType == .builtInTripleCamera || 
+                    device.deviceType == .builtInDualWideCamera || 
+                    device.deviceType == .builtInDualCamera) {
+                    // 对于虚拟设备，闪光灯功能通常在广角镜头上
+                    print("在虚拟摄像头上设置闪光灯: \(mode)")
+                }
+                
                 device.unlockForConfiguration()
                 
                 // 发送闪光灯模式变化事件
@@ -673,16 +779,50 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         do {
             try device.lockForConfiguration()
             
-            // iOS中曝光补偿范围通常是-8到8，我们需要将-2到2的范围映射到iOS的范围
-            if device.isExposureModeSupported(.custom) {
+            // 支持iOS虚拟摄像头的曝光控制
+            let exposureSupported: Bool
+            
+            if #available(iOS 13.0, *) {
+                // 对于虚拟摄像头和标准摄像头，都应该支持曝光控制
+                exposureSupported = device.isExposureModeSupported(.custom) || 
+                                    device.isExposureModeSupported(.continuousAutoExposure)
+            } else {
+                exposureSupported = device.isExposureModeSupported(.custom)
+            }
+            
+            if exposureSupported {
                 // 将-2到2范围映射到设备支持的曝光补偿范围
                 let minExposure = Float(device.minExposureTargetBias)
                 let maxExposure = Float(device.maxExposureTargetBias)
                 let normalizedValue = Float((value + 2.0) / 4.0) // 转换为0-1范围
                 let scaledValue = minExposure + normalizedValue * (maxExposure - minExposure)
                 
-                // 设置曝光偏移
-                device.setExposureTargetBias(scaledValue, completionHandler: nil)
+                // 设置曝光偏移 - 使用平滑过渡提升用户体验
+                if #available(iOS 13.0, *) {
+                    // 对于iOS 13+，支持更平滑的曝光变化
+                    device.setExposureTargetBias(scaledValue, completionHandler: nil)
+                    
+                    // 如果是虚拟设备，确保曝光模式设置正确
+                    if hasVirtualDeviceSupport {
+                        if device.exposureMode != .custom && device.exposureMode != .continuousAutoExposure {
+                            // 对于虚拟设备，连续自动曝光通常效果更好
+                            device.exposureMode = device.isExposureModeSupported(.continuousAutoExposure) ? 
+                                                  .continuousAutoExposure : .custom
+                        }
+                    } else {
+                        // 非虚拟设备使用自定义模式
+                        if device.exposureMode != .custom {
+                            device.exposureMode = .custom
+                        }
+                    }
+                } else {
+                    // iOS 13以下的标准实现
+                    device.setExposureTargetBias(scaledValue, completionHandler: nil)
+                    
+                    if device.exposureMode != .custom {
+                        device.exposureMode = .custom
+                    }
+                }
                 
                 // 发送曝光更改事件
                 sendEvent(type: "exposureChanged", data: [
@@ -730,15 +870,39 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         // 创建拍照设置
         let settings = AVCapturePhotoSettings()
         
-        // 检查是否支持自动闪光灯
-        let autoFlashSupported: Bool
-        if #available(iOS 10.0, *) {
-            autoFlashSupported = photoOutput.supportedFlashModes.contains(.auto)
-        } else {
-            autoFlashSupported = true // 在旧版iOS上假设支持
+        // 检查当前设备是否为虚拟设备
+        let isVirtualDevice = false
+        if #available(iOS 13.0, *), let device = currentDevice {
+            if device.deviceType == .builtInTripleCamera || 
+               device.deviceType == .builtInDualWideCamera || 
+               device.deviceType == .builtInDualCamera {
+                // 对于虚拟设备，使用高质量拍照设置
+                settings.isHighResolutionPhotoEnabled = true
+                
+                // 如果当前缩放是超广角范围(0.5x)，确保正确捕获
+                if currentZoomFactor < 1.0 && hasUltraWideCamera {
+                    // 超广角模式下自动应用
+                    print("在虚拟摄像头超广角模式下拍照")
+                } else if currentZoomFactor >= 2.5 && hasTelephotoCamera {
+                    // 长焦模式下自动应用
+                    print("在虚拟摄像头长焦模式下拍照")
+                } else {
+                    // 广角模式下自动应用
+                    print("在虚拟摄像头广角模式下拍照")
+                }
+            }
         }
-        if autoFlashSupported {
-            settings.flashMode = .auto
+        
+        // 检查是否支持闪光灯
+        if let device = currentDevice, device.hasFlash && device.isFlashAvailable {
+            if #available(iOS 10.0, *) {
+                // 检查闪光灯模式支持
+                if photoOutput.supportedFlashModes.contains(.auto) {
+                    settings.flashMode = .auto
+                }
+            } else {
+                settings.flashMode = .auto
+            }
         }
         
         // 设置高质量照片捕获
@@ -831,7 +995,7 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         var state: [String: Any] = [:]
         
         // 基本状态
-        state["isInitialized"] = isInitialized
+        state["isInitialized"] = isCameraInitialized
         state["isRunning"] = isRunning
         state["currentPosition"] = currentPosition == .back ? "back" : "front"
         
@@ -918,14 +1082,13 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         // 开始配置
         session.beginConfiguration()
         
-        // 设置会话预设
-        // 使用 .photo 预设，这会提供更高质量的预览
-        // 原来是 .high，这可能不是最适合显示的分辨率
+        // 设置会话预设 - 在iOS 13+上为了获得更好的图像质量，使用photo
         if session.canSetSessionPreset(.photo) {
             session.sessionPreset = .photo
         }
         
         // 配置相机输入
+        // 注意：iOS 13+设备上会优先使用虚拟摄像头设备(如三摄或双摄)
         try configureCamera(position: .back)
         
         // 配置视频输出
@@ -936,6 +1099,18 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         
         // 提交配置
         session.commitConfiguration()
+        
+        // 打印诊断信息
+        if #available(iOS 13.0, *), let device = currentDevice {
+            print("当前设备类型: \(device.deviceType)")
+            print("虚拟设备支持: \(hasVirtualDeviceSupport)")
+            
+            if hasVirtualDeviceSupport {
+                print("切换点: \(virtualDeviceSwitchPoints)")
+                print("最小缩放: \(device.minAvailableVideoZoomFactor)")
+                print("最大缩放: \(device.maxAvailableVideoZoomFactor)")
+            }
+        }
     }
     
     /// 配置相机（输入）
@@ -944,31 +1119,106 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             throw NSError(domain: "com.haohaopai.app", code: 1001, userInfo: [NSLocalizedDescriptionKey: "捕获会话未创建"])
         }
         
-        // 移除现有的输入
-        if let currentInput = currentDeviceInput {
-            session.removeInput(currentInput)
-            currentDeviceInput = nil
+        // 移除所有现有的输入
+        for input in session.inputs {
+            session.removeInput(input)
         }
+        currentDeviceInput = nil
         
         // 检查设备支持能力
         checkCameraCapabilities()
         
-        // 获取指定位置的相机
-        guard let newCamera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position) else {
+        // 优先尝试获取虚拟摄像头设备 - 适配iOS 13+
+        var newCamera: AVCaptureDevice?
+        
+        if #available(iOS 13.0, *), position == .back {
+            // 优先尝试获取支持的虚拟摄像头设备（按优先级尝试）
+            let deviceTypes: [AVCaptureDevice.DeviceType] = [
+                .builtInTripleCamera,    // 超广角+广角+长焦（iPhone 12 Pro+）
+                .builtInDualWideCamera,  // 超广角+广角（iPhone 11+）
+                .builtInDualCamera       // 广角+长焦（iPhone 7 Plus - 11 Pro）
+            ]
+            
+            // 使用discoverySession查找支持的虚拟摄像头
+            let discoverySession = AVCaptureDevice.DiscoverySession(
+                deviceTypes: deviceTypes,
+                mediaType: .video,
+                position: position
+            )
+            
+            // 使用第一个找到的虚拟设备
+            newCamera = discoverySession.devices.first
+            
+            if let device = newCamera {
+                print("成功获取虚拟设备：\(device.deviceType)")
+                hasVirtualDeviceSupport = true
+                
+                // 获取虚拟设备切换点
+                if let switchPoints = device.virtualDeviceSwitchOverVideoZoomFactors as? [NSNumber] {
+                    virtualDeviceSwitchPoints = switchPoints.map { CGFloat($0.doubleValue) }
+                    print("虚拟设备切换点: \(virtualDeviceSwitchPoints)")
+                }
+            } else {
+                print("未找到虚拟设备，将使用标准广角相机")
+                hasVirtualDeviceSupport = false
+            }
+        }
+        
+        // 如果无法获取虚拟设备，退回到标准广角摄像头
+        if newCamera == nil {
+            print("使用标准广角摄像头")
+            newCamera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position)
+        }
+        
+        // 确保获取到了摄像头设备
+        guard let camera = newCamera else {
             throw NSError(domain: "com.haohaopai.app", code: 1002, userInfo: [NSLocalizedDescriptionKey: "找不到指定位置的相机"])
         }
         
         // 创建相机输入
-        let newInput = try AVCaptureDeviceInput(device: newCamera)
+        let newInput = try AVCaptureDeviceInput(device: camera)
         
         // 添加到会话
         if session.canAddInput(newInput) {
             session.addInput(newInput)
             currentDeviceInput = newInput
-            currentDevice = newCamera
+            currentDevice = camera
             currentPosition = position
             currentZoomFactor = 1.0 // 重置缩放
-            currentDeviceType = .builtInWideAngleCamera // 默认使用广角相机
+            
+            // 根据设备类型设置当前设备类型
+            if #available(iOS 13.0, *) {
+                if camera.deviceType == .builtInTripleCamera || 
+                   camera.deviceType == .builtInDualWideCamera ||
+                   camera.deviceType == .builtInDualCamera {
+                    // 虚拟设备默认使用广角作为基础
+                    currentDeviceType = .builtInWideAngleCamera
+                    
+                    // 为虚拟设备配置最佳设置
+                    do {
+                        try camera.lockForConfiguration()
+                        
+                        // 配置自动对焦和曝光
+                        if camera.isFocusModeSupported(.continuousAutoFocus) {
+                            camera.focusMode = .continuousAutoFocus
+                        }
+                        
+                        if camera.isExposureModeSupported(.continuousAutoExposure) {
+                            camera.exposureMode = .continuousAutoExposure
+                        }
+                        
+                        // 移除视频稳定设置，这将在配置视频输出连接时设置
+                        
+                        camera.unlockForConfiguration()
+                    } catch {
+                        print("配置虚拟设备高级设置失败: \(error.localizedDescription)")
+                    }
+                } else {
+                    currentDeviceType = camera.deviceType
+                }
+            } else {
+                currentDeviceType = camera.deviceType
+            }
         } else {
             throw NSError(domain: "com.haohaopai.app", code: 1003, userInfo: [NSLocalizedDescriptionKey: "无法添加相机输入到会话"])
         }
@@ -976,41 +1226,92 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     
     /// 检查相机能力
     private func checkCameraCapabilities() {
-        // 根据iOS版本确定设备类型列表
-        var deviceTypes: [AVCaptureDevice.DeviceType] = [.builtInWideAngleCamera, .builtInTelephotoCamera]
+        // 根据iOS版本确定要检查的设备类型列表
+        var standardDeviceTypes: [AVCaptureDevice.DeviceType] = [
+            .builtInWideAngleCamera, 
+            .builtInTelephotoCamera
+        ]
         
-        // 仅在iOS 13及以上添加超广角相机
+        var virtualDeviceTypes: [AVCaptureDevice.DeviceType] = []
+        
+        // 仅在iOS 13及以上添加超广角相机和虚拟设备
         if #available(iOS 13.0, *) {
-            deviceTypes.append(.builtInUltraWideCamera)
+            standardDeviceTypes.append(.builtInUltraWideCamera)
+            virtualDeviceTypes = [
+                .builtInTripleCamera,    // 超广角+广角+长焦
+                .builtInDualWideCamera,  // 超广角+广角
+                .builtInDualCamera       // 广角+长焦
+            ]
         }
         
-        // 发现相机设备
-        let discoverySession = AVCaptureDevice.DiscoverySession(
-            deviceTypes: deviceTypes,
-            mediaType: .video,
-            position: currentPosition
-        )
-        
-        // 重置状态
-        hasUltraWideCamera = false
-        hasTelephotoCamera = false
-        
-        // 检查支持的相机类型
-        for device in discoverySession.devices {
-            if #available(iOS 13.0, *) {
-                if device.deviceType == .builtInUltraWideCamera {
-                    hasUltraWideCamera = true
-                    print("检测到超广角相机")
-                    continue
+        // 检查虚拟设备支持
+        hasVirtualDeviceSupport = false
+        if #available(iOS 13.0, *) {
+            let virtualDiscoverySession = AVCaptureDevice.DiscoverySession(
+                deviceTypes: virtualDeviceTypes,
+                mediaType: .video,
+                position: .back
+            )
+            
+            let virtualDevices = virtualDiscoverySession.devices
+            if !virtualDevices.isEmpty {
+                hasVirtualDeviceSupport = true
+                
+                // 记录找到的第一个虚拟设备类型（日志）
+                if let firstDevice = virtualDevices.first {
+                    print("检测到虚拟摄像头支持，类型: \(firstDevice.deviceType)")
+                    
+                    // 获取切换点
+                    if let switchPoints = firstDevice.virtualDeviceSwitchOverVideoZoomFactors as? [NSNumber] {
+                        virtualDeviceSwitchPoints = switchPoints.map { CGFloat($0.doubleValue) }
+                        print("虚拟设备切换点: \(virtualDeviceSwitchPoints)")
+                    }
                 }
             }
+        }
+        
+        // 如果不支持虚拟设备，则继续检查单独的相机设备
+        if !hasVirtualDeviceSupport {
+            // 发现标准相机设备
+            let discoverySession = AVCaptureDevice.DiscoverySession(
+                deviceTypes: standardDeviceTypes,
+                mediaType: .video,
+                position: currentPosition
+            )
             
-            switch device.deviceType {
-            case .builtInTelephotoCamera:
-                hasTelephotoCamera = true
-                print("检测到长焦相机")
-            default:
-                break
+            // 重置状态
+            hasUltraWideCamera = false
+            hasTelephotoCamera = false
+            
+            // 检查支持的相机类型
+            for device in discoverySession.devices {
+                if #available(iOS 13.0, *) {
+                    if device.deviceType == .builtInUltraWideCamera {
+                        hasUltraWideCamera = true
+                        print("检测到超广角相机")
+                        continue
+                    }
+                }
+                
+                switch device.deviceType {
+                case .builtInTelephotoCamera:
+                    hasTelephotoCamera = true
+                    print("检测到长焦相机")
+                default:
+                    break
+                }
+            }
+        } else {
+            // 如果支持虚拟设备，则假设同时支持超广角和长焦
+            if #available(iOS 13.0, *) {
+                for deviceType in virtualDeviceTypes {
+                    if deviceType == .builtInDualWideCamera || deviceType == .builtInTripleCamera {
+                        hasUltraWideCamera = true
+                    }
+                    if deviceType == .builtInDualCamera || deviceType == .builtInTripleCamera {
+                        hasTelephotoCamera = true
+                    }
+                }
             }
         }
         
@@ -1020,9 +1321,40 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     
     /// 获取最佳切换点
     private func getOptimalSwitchPoints() -> (wideToUltraWide: CGFloat, wideToTele: CGFloat) {
+        // 如果有虚拟设备切换点，优先使用这些值
+        if !virtualDeviceSwitchPoints.isEmpty {
+            // 虚拟设备通常会有 1-2 个切换点，根据设备类型不同
+            // 值通常是递增的，如 [2.0] 或 [0.5, 2.0]
+            
+            var wideToUltraWide: CGFloat = 0.8 // 默认值
+            var wideToTele: CGFloat = 2.0 // 默认值
+            
+            // 根据切换点设置阈值
+            if virtualDeviceSwitchPoints.count >= 2 {
+                // 三摄设备通常是 [0.5, 2.0] - 超广角到广角，广角到长焦
+                wideToUltraWide = virtualDeviceSwitchPoints[0]
+                wideToTele = virtualDeviceSwitchPoints[1]
+            } else if virtualDeviceSwitchPoints.count == 1 {
+                // 双摄设备通常是 [2.0]（广角+长焦）或 [0.5]（超广角+广角）
+                let point = virtualDeviceSwitchPoints[0]
+                if point < 1.0 {
+                    // 超广角+广角设备
+                    wideToUltraWide = point
+                    wideToTele = CGFloat.infinity
+                } else {
+                    // 广角+长焦设备
+                    wideToUltraWide = CGFloat.infinity
+                    wideToTele = point
+                }
+            }
+            
+            return (wideToUltraWide: wideToUltraWide, wideToTele: wideToTele)
+        }
+        
+        // 如果没有虚拟设备切换点，使用默认值
         return (
             wideToUltraWide: hasUltraWideCamera ? 0.8 : CGFloat.infinity,
-            wideToTele: hasTelephotoCamera ? 2.7 : CGFloat.infinity
+            wideToTele: hasTelephotoCamera ? 2.5 : CGFloat.infinity
         )
     }
     
@@ -1032,10 +1364,15 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             throw NSError(domain: "com.haohaopai.app", code: 1001, userInfo: [NSLocalizedDescriptionKey: "捕获会话未创建"])
         }
         
-        // 移除现有的视频输出
-        if let currentOutput = videoDataOutput {
-            session.removeOutput(currentOutput)
+        // 移除所有视频输出
+        for output in session.outputs {
+            if output is AVCaptureVideoDataOutput {
+                session.removeOutput(output)
+            }
         }
+        
+        // 重置当前引用
+        videoDataOutput = nil
         
         // 创建新的视频输出
         let newVideoOutput = AVCaptureVideoDataOutput()
@@ -1053,6 +1390,19 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         if session.canAddOutput(newVideoOutput) {
             session.addOutput(newVideoOutput)
             videoDataOutput = newVideoOutput
+            
+            // 获取视频连接并配置视频稳定
+            if let videoConnection = newVideoOutput.connection(with: .video) {
+                // 设置视频方向
+                if videoConnection.isVideoOrientationSupported {
+                    videoConnection.videoOrientation = .portrait
+                }
+                
+                // 设置视频稳定模式（如果支持）
+                if videoConnection.isVideoStabilizationSupported {
+                    videoConnection.preferredVideoStabilizationMode = .auto
+                }
+            }
         } else {
             throw NSError(domain: "com.haohaopai.app", code: 1004, userInfo: [NSLocalizedDescriptionKey: "无法添加视频输出到会话"])
         }
@@ -1064,10 +1414,15 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             throw NSError(domain: "com.haohaopai.app", code: 1001, userInfo: [NSLocalizedDescriptionKey: "捕获会话未创建"])
         }
         
-        // 移除现有的照片输出
-        if let currentOutput = photoOutput {
-            session.removeOutput(currentOutput)
+        // 移除所有现有的照片输出
+        for output in session.outputs {
+            if output is AVCapturePhotoOutput {
+                session.removeOutput(output)
+            }
         }
+        
+        // 重置当前引用
+        photoOutput = nil
         
         // 创建新的照片输出
         let newPhotoOutput = AVCapturePhotoOutput()
@@ -1079,6 +1434,19 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         if session.canAddOutput(newPhotoOutput) {
             session.addOutput(newPhotoOutput)
             photoOutput = newPhotoOutput
+            
+            // 配置照片输出连接
+            if let photoConnection = newPhotoOutput.connection(with: .video) {
+                // 设置视频方向
+                if photoConnection.isVideoOrientationSupported {
+                    photoConnection.videoOrientation = .portrait
+                }
+                
+                // 设置视频稳定（如果支持）
+                if photoConnection.isVideoStabilizationSupported {
+                    photoConnection.preferredVideoStabilizationMode = .auto
+                }
+            }
         } else {
             throw NSError(domain: "com.haohaopai.app", code: 1005, userInfo: [NSLocalizedDescriptionKey: "无法添加照片输出到会话"])
         }
@@ -1089,6 +1457,46 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         // 这里可以处理视频帧
         // 如果需要实现即时帧处理功能，可以在这里添加代码
+    }
+    
+    // 清理之前的会话
+    private func cleanupOldSession() {
+        // 使用主队列确保线程安全
+        if Thread.isMainThread {
+            performCleanup()
+        } else {
+            DispatchQueue.main.sync {
+                performCleanup()
+            }
+        }
+    }
+    
+    // 执行实际的清理操作
+    private func performCleanup() {
+        // 如果captureSession已经存在且正在运行，先停止
+        if captureSession?.isRunning == true {
+            captureSession?.stopRunning()
+        }
+        
+        // 移除所有的输入和输出
+        if let session = captureSession {
+            for input in session.inputs {
+                session.removeInput(input)
+            }
+            for output in session.outputs {
+                session.removeOutput(output)
+            }
+        }
+        
+        // 重置session
+        captureSession = AVCaptureSession()
+        
+        // 重置状态
+        isRunning = false
+        photoOutput = nil
+        videoDataOutput = nil
+        currentDevice = nil
+        currentDeviceInput = nil
     }
 }
 

@@ -26,6 +26,8 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>MinimumOSVersion</key>
+	<string>13.0</string>
 	<key>NSCameraUsageDescription</key>
 	<string>需要访问您的相机以便拍摄照片，并提供AI智能分析和构图建议</string>
 	<key>NSPhotoLibraryUsageDescription</key>

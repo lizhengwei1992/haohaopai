@@ -70,6 +70,7 @@ class _CameraScreenState extends State<CameraScreen>
   // 相机状态
   bool _isInitialized = false;
   bool _useNativeCamera = true;
+  double _currentZoomLevel = 1.0; // 当前缩放级别
 
   @override
   void initState() {
@@ -177,9 +178,44 @@ class _CameraScreenState extends State<CameraScreen>
         break;
 
       case 'zoomChanged':
-        final zoom = event['zoomFactor'] as double?;
-        if (zoom != null && mounted) {
-          _stateManager.currentZoomLevel = zoom;
+        final zoomFactor = event['zoomFactor'] as double?;
+        if (zoomFactor != null && mounted) {
+          // 更新显示的缩放级别
+          setState(() {
+            _currentZoomLevel = zoomFactor;
+          });
+
+          // 同步更新状态管理器的缩放级别
+          _stateManager.currentZoomLevel = zoomFactor;
+
+          // 如果正在缩放引起镜头切换，重置状态
+          if (_stateManager.isCameraChanging) {
+            _stateManager.isCameraChanging = false;
+            debugPrint('镜头切换完成，重置isCameraChanging状态');
+          }
+        }
+        break;
+
+      case 'virtualDeviceZoomChanged':
+        // 处理虚拟设备丝滑缩放事件 - iOS 13+设备的特殊事件
+        final zoomFactor = event['zoomFactor'] as double?;
+        final isSmooth = event['isSmooth'] as bool? ?? false;
+        if (zoomFactor != null && mounted) {
+          debugPrint('虚拟摄像头缩放: $zoomFactor, 丝滑切换: $isSmooth');
+
+          // 更新显示的缩放级别
+          setState(() {
+            _currentZoomLevel = zoomFactor;
+          });
+
+          // 同步更新状态管理器的缩放级别
+          _stateManager.currentZoomLevel = zoomFactor;
+
+          // 如果正在缩放引起镜头切换，重置状态
+          if (_stateManager.isCameraChanging) {
+            _stateManager.isCameraChanging = false;
+            debugPrint('虚拟镜头切换完成，重置isCameraChanging状态');
+          }
         }
         break;
 

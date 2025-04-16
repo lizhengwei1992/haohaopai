@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../services/native_camera_service.dart';
 import 'dart:async';
+import 'dart:io';
+import 'dart:math';
 
 /// 全局相机状态管理器
 class CameraStateManager extends ChangeNotifier {
@@ -239,6 +241,22 @@ class CameraStateManager extends ChangeNotifier {
       final hasUltraWide = rawCameraTypes.contains('ultraWide');
       debugPrint('是否支持超广角: $hasUltraWide');
 
+      // 检查是否支持虚拟摄像头 - iOS 13+ 独有功能
+      final hasVirtualDeviceSupport =
+          Platform.isIOS && (capabilities['hasVirtualDeviceSupport'] ?? false);
+      _cameraCapabilities['hasVirtualDeviceSupport'] = hasVirtualDeviceSupport;
+
+      debugPrint('是否支持虚拟摄像头: $hasVirtualDeviceSupport');
+
+      // 如果设备支持虚拟摄像头，记录切换点信息
+      List<double> switchPoints = [];
+      if (hasVirtualDeviceSupport) {
+        final rawSwitchPoints = capabilities['virtualDeviceSwitchPoints'] ?? [];
+        switchPoints =
+            List<double>.from(rawSwitchPoints.map((x) => x.toDouble()));
+        debugPrint('虚拟摄像头切换点: $switchPoints');
+      }
+
       // 设置缩放范围（如果支持超广角，则下限可设为0.5）
       _minZoomLevel = hasUltraWide ? 0.5 : 1.0;
       debugPrint('设置缩放下限为: $_minZoomLevel');
@@ -262,10 +280,29 @@ class CameraStateManager extends ChangeNotifier {
 
       // 设置缩放范围
       _maxZoomLevel = capabilities['maxZoomLevel']?.toDouble() ?? 3.0;
-      // 默认缩放比例固定为 1.0，无论设备是否支持超广角
-      _currentZoomLevel = 1.0;
+
+      // 如果支持虚拟摄像头，可能支持更高的缩放倍率
+      if (hasVirtualDeviceSupport) {
+        _maxZoomLevel = max(_maxZoomLevel, 10.0); // 虚拟摄像头通常支持最大10倍缩放
+      }
+
+      // 默认缩放比例设置 - 考虑虚拟摄像头特性
+      if (hasVirtualDeviceSupport && hasUltraWide) {
+        // 针对虚拟摄像头，设置初始缩放为2.0以显示广角(1x)效果
+        // 因为在DualWideCamera设备上，缩放因子1.0对应的是超广角(0.5x)
+        if (switchPoints.isNotEmpty && switchPoints[0] == 2.0) {
+          _currentZoomLevel = 2.0; // 设置为2.0显示常规1x视角
+          debugPrint('检测到DualWideCamera设备，设置默认缩放为2.0 (1x广角效果)');
+        } else {
+          _currentZoomLevel = 1.0; // 默认值
+        }
+      } else {
+        // 非虚拟摄像头设备使用1.0
+        _currentZoomLevel = 1.0;
+      }
+
       currentZoomLevelNotifier.value = _currentZoomLevel; // 确保初始值正确
-      debugPrint('设置默认缩放比例为: 1.0');
+      debugPrint('设置默认缩放比例为: $_currentZoomLevel, 最大缩放: $_maxZoomLevel');
 
       // 设置曝光范围
       _minExposureValue = capabilities['minExposureValue']?.toDouble() ?? -2.0;
@@ -275,15 +312,16 @@ class CameraStateManager extends ChangeNotifier {
       // 设置默认闪光灯模式
       _flashMode = 'auto';
       _isFlashOn = true;
-      final cameraController =
-          NativeCameraService.instance.getGlobalCameraController();
-      if (cameraController != null) {
-        await cameraController.setFlashMode(_flashMode);
-      }
 
-      // 标记初始化完成
+      // 相机已初始化
       _isCameraInitialized = true;
       notifyListeners();
+
+      // iOS 13+ 设备会自动使用虚拟摄像头（如有），可实现丝滑的缩放体验，
+      // 尤其是在0.5x-1x(超广角至广角)切换时，将不再出现明显卡顿
+      if (hasVirtualDeviceSupport) {
+        debugPrint('检测到虚拟摄像头支持，将使用系统级缩放功能实现丝滑缩放体验');
+      }
     } catch (e) {
       debugPrint('初始化相机设置时出错: $e');
     }
@@ -451,7 +489,7 @@ class CameraStateManager extends ChangeNotifier {
     }
   }
 
-  /// 设置缩放级别
+  /// 设置缩放级别，使用iOS虚拟摄像头实现丝滑缩放
   Future<void> setZoom(double value) async {
     // 确保值在范围内
     if (value < _minZoomLevel) {
@@ -460,9 +498,28 @@ class CameraStateManager extends ChangeNotifier {
       value = _maxZoomLevel;
     }
 
-    // 判断是否切换相机类型
-    bool isCameraTypeChange = (value < 1.0 && _currentZoomLevel >= 1.0) ||
-        (_currentZoomLevel < 1.0 && value >= 1.0);
+    // 仅对非iOS设备或不支持虚拟摄像头的设备判断是否需要切换相机类型
+    bool isCameraTypeChange = false;
+
+    if (Platform.isIOS) {
+      // 检查是否支持虚拟摄像头 - iOS 13+设备通常支持
+      final hasVirtualDeviceSupport =
+          _cameraCapabilities['hasVirtualDeviceSupport'] ?? false;
+
+      if (!hasVirtualDeviceSupport) {
+        // 只有不支持虚拟摄像头的设备才需要判断超广角切换条件
+        isCameraTypeChange = (value < 1.0 && _currentZoomLevel >= 1.0) ||
+            (_currentZoomLevel < 1.0 && value >= 1.0);
+      } else {
+        // 支持虚拟摄像头的设备无需判断切换，系统会自动处理
+        isCameraTypeChange = false;
+        debugPrint('使用虚拟摄像头设备，缩放无需切换相机类型');
+      }
+    } else {
+      // 非iOS设备仍需判断超广角切换
+      isCameraTypeChange = (value < 1.0 && _currentZoomLevel >= 1.0) ||
+          (_currentZoomLevel < 1.0 && value >= 1.0);
+    }
 
     if (isCameraTypeChange) {
       // 如果正在切换，则忽略新的请求以防止冲突
@@ -480,7 +537,7 @@ class CameraStateManager extends ChangeNotifier {
       final cameraController =
           NativeCameraService.instance.getGlobalCameraController();
       if (cameraController != null) {
-        // 直接调用原生方法，不再使用超时
+        // 使用系统级缩放效果，支持虚拟摄像头设备的丝滑缩放
         final success = await cameraController.setSystemLikeZoom(value);
 
         if (success) {
@@ -507,7 +564,7 @@ class CameraStateManager extends ChangeNotifier {
         notifyListeners();
       }
     }
-    // finally 块被移除，isCameraChanging 由事件或错误处理重置
+    // isCameraChanging 由事件或错误处理重置
   }
 
   /// 设置拍摄比例

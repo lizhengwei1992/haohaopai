@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../state/camera_state_manager.dart';
 
 /// 原生相机服务，提供与iOS原生相机通信的接口
 class NativeCameraService {
@@ -419,69 +420,30 @@ class NativeCameraController {
     }
   }
 
-  /// 设置系统级缩放效果（支持超广角相机）
+  /// 设置系统级缩放效果（支持虚拟摄像头和超广角相机）
   Future<bool> setSystemLikeZoom(double zoomLevel) async {
     debugPrint('调用setSystemLikeZoom: $zoomLevel');
 
-    // 小于1.0表示超广角，可能需要特殊处理
-    final bool isUltraWide = zoomLevel < 1.0;
+    try {
+      final bool success = await _methodChannel.invokeMethod(
+        'setSystemLikeZoom',
+        {'zoomLevel': zoomLevel},
+      );
 
-    // 尝试次数
-    int attempts = 0;
-    const maxAttempts = 2;
-
-    while (attempts < maxAttempts) {
-      attempts++;
-      debugPrint('尝试设置系统级缩放 (第$attempts次): $zoomLevel');
-
-      try {
-        final bool success = await _methodChannel.invokeMethod(
-          'setSystemLikeZoom',
-          {'zoomLevel': zoomLevel},
-        );
-
-        if (success) {
-          debugPrint('系统级缩放设置成功: $zoomLevel');
-          return true;
-        } else {
-          debugPrint('系统级缩放设置失败，API返回false');
-
-          // 如果是超广角模式且第一次尝试失败，短暂等待后重试
-          if (isUltraWide && attempts < maxAttempts) {
-            debugPrint('超广角模式设置失败，等待后重试');
-            await Future.delayed(const Duration(milliseconds: 500));
-            continue;
-          }
-
-          return false;
-        }
-      } on PlatformException catch (e) {
-        debugPrint('设置系统级缩放效果时出错: ${e.message}');
-
-        // 如果是超广角模式且第一次尝试失败，短暂等待后重试
-        if (isUltraWide && attempts < maxAttempts) {
-          debugPrint('超广角模式设置失败(错误)，等待后重试');
-          await Future.delayed(const Duration(milliseconds: 500));
-          continue;
-        }
-
-        return false;
-      } catch (e) {
-        debugPrint('设置系统级缩放效果时发生未知错误: $e');
-
-        // 如果是超广角模式且第一次尝试失败，短暂等待后重试
-        if (isUltraWide && attempts < maxAttempts) {
-          debugPrint('超广角模式设置失败(未知错误)，等待后重试');
-          await Future.delayed(const Duration(milliseconds: 500));
-          continue;
-        }
-
+      if (success) {
+        debugPrint('系统级缩放设置成功: $zoomLevel');
+        return true;
+      } else {
+        debugPrint('系统级缩放设置失败，API返回false');
         return false;
       }
+    } on PlatformException catch (e) {
+      debugPrint('设置系统级缩放效果时出错: ${e.message}');
+      return false;
+    } catch (e) {
+      debugPrint('设置系统级缩放效果时发生未知错误: $e');
+      return false;
     }
-
-    // 如果所有尝试都失败，返回false
-    return false;
   }
 
   /// 设置闪光灯模式
@@ -627,33 +589,98 @@ class _NativeCameraViewState extends State<NativeCameraView>
   }
 
   void _handleCameraEvent(Map<String, dynamic> event) {
-    // 处理来自相机的事件，如需要可以在这里添加更多逻辑
+    // 导入相机状态管理器
+    final cameraStateManager = CameraStateManager.instance;
+
+    // 处理来自相机的事件
     final String type = event['type'] as String? ?? 'unknown';
 
     switch (type) {
       case 'initialized':
         debugPrint('相机事件: 初始化完成');
         break;
+
       case 'error':
         debugPrint('相机事件: 错误 - ${event['message']}');
         break;
+
       case 'zoomChanged':
-        debugPrint('相机事件: 缩放变化 - ${event['zoomFactor']}');
+        final zoomFactor = event['zoomFactor'] as double? ?? 1.0;
+        final deviceType = event['deviceType'] as String? ?? 'unknown';
+        debugPrint('相机事件: 缩放变化 - $zoomFactor, 设备类型: $deviceType');
+
+        // 更新相机状态管理器的缩放值
+        cameraStateManager.currentZoomLevel = zoomFactor;
+
+        // 如果有相机类型切换，重置切换状态
+        if (cameraStateManager.isCameraChanging) {
+          cameraStateManager.isCameraChanging = false;
+        }
         break;
+
       case 'previewLayerUpdated':
-        debugPrint('相机事件: 预览层更新 (Flutter 端不主动重启预览)');
-        // 注释掉重启预览的调用
-        // WidgetsBinding.instance.addPostFrameCallback((_) {
-        //   _restartPreview();
-        // });
+        debugPrint('相机事件: 预览层更新');
         break;
+
       case 'cameraTypeChanged':
-        debugPrint('相机事件: 相机类型变化 - ${event['deviceType']} (Flutter 端不主动重启预览)');
-        // 注释掉重启预览的调用
-        // WidgetsBinding.instance.addPostFrameCallback((_) {
-        //   _restartPreview();
-        // });
+        final deviceType = event['deviceType'] as String? ?? 'unknown';
+        debugPrint('相机事件: 相机类型变化 - $deviceType');
+
+        // 重置相机切换状态
+        if (cameraStateManager.isCameraChanging) {
+          cameraStateManager.isCameraChanging = false;
+        }
+
+        // 重置相机切换处理状态
+        if (cameraStateManager.isProcessingCameraChange) {
+          cameraStateManager.isProcessingCameraChange = false;
+        }
         break;
+
+      case 'virtualDeviceZoomChanged':
+        // 处理虚拟设备缩放变化事件 - iOS 13+设备的关键事件
+        final zoomFactor = event['zoomFactor'] as double? ?? 1.0;
+        final isSmooth = event['isSmooth'] as bool? ?? false;
+        debugPrint('相机事件: 虚拟设备缩放变化 - $zoomFactor, 丝滑切换: $isSmooth');
+
+        // 更新相机状态管理器的缩放值 - 虚拟设备缩放比传统缩放优先级更高
+        cameraStateManager.currentZoomLevel = zoomFactor;
+
+        // 如果之前有相机类型切换状态，重置它
+        if (cameraStateManager.isCameraChanging) {
+          cameraStateManager.isCameraChanging = false;
+        }
+        break;
+
+      case 'flashModeChanged':
+        final mode = event['mode'] as String? ?? 'auto';
+        debugPrint('相机事件: 闪光灯模式变化 - $mode');
+
+        // 更新相机状态管理器的闪光灯模式
+        cameraStateManager.flashMode = mode;
+        cameraStateManager.isFlashOn = mode == 'auto';
+        break;
+
+      case 'exposureChanged':
+        final exposureValue = event['exposureValue'] as double? ?? 0.0;
+        final success = event['success'] as bool? ?? false;
+        debugPrint('相机事件: 曝光值变化 - $exposureValue, 成功: $success');
+
+        if (success) {
+          // 更新相机状态管理器的曝光值
+          cameraStateManager.currentExposureValue = exposureValue;
+        }
+        break;
+
+      case 'cameraSwitched':
+        final position = event['position'] as String? ?? 'back';
+        debugPrint('相机事件: 相机切换完成 - $position');
+
+        // 更新相机状态管理器的相机位置
+        cameraStateManager.currentCameraType = position;
+        cameraStateManager.isProcessingCameraChange = false;
+        break;
+
       default:
         debugPrint('相机事件: $type - $event');
         break;
@@ -746,10 +773,23 @@ class _NativeCameraViewState extends State<NativeCameraView>
   // 初始化并启动预览
   Future<void> _initializeAndStartPreview() async {
     try {
-      // 初始化相机
-      final initialized = await _controller?.initialize() ?? false;
-      if (initialized) {
-        // 启动预览
+      // 先检查相机是否已准备就绪
+      final isReady = await NativeCameraService.instance.isCameraReady();
+      debugPrint('相机准备状态检查: $isReady');
+
+      if (!isReady) {
+        debugPrint('相机未就绪，开始初始化...');
+        // 初始化相机
+        final initialized = await _controller?.initialize() ?? false;
+        debugPrint('相机初始化结果: $initialized');
+
+        if (initialized) {
+          // 启动预览
+          await _controller?.startPreview();
+        }
+      } else {
+        debugPrint('相机已就绪，跳过初始化，直接启动预览');
+        // 相机已经初始化，仅启动预览
         await _controller?.startPreview();
       }
     } catch (e) {

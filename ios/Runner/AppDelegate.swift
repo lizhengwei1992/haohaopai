@@ -1,12 +1,16 @@
 import Flutter
 import UIKit
 import AVFoundation
+import UserNotifications
 // 不需要导入外部模块，这些Swift文件在同一个项目中
 
 // 备注: 我们移除了有类型问题的扩展，改为在应用中管理事件通道的生命周期
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
+  // 私有标识，防止多次初始化相机
+  private var isCameraInitializing = false
+  
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
@@ -37,7 +41,9 @@ import AVFoundation
         case "getCameraCapabilities":
             self.getCameraCapabilities(result: result)
         case "initializeCamera":
-            CameraSingleton.shared.initializeCamera(result: result)
+            CameraSingleton.shared.initializeCamera { success in
+                result(success)
+            }
         case "isCameraReady":
             CameraSingleton.shared.isCameraReady(result)
         case "pauseCamera":
@@ -54,13 +60,9 @@ import AVFoundation
     // 预热相机权限，提高相机启动速度
     self.preheatCameraPermission()
     
-    // 延迟初始化相机服务，避免阻塞App启动
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-        NSLog("开始后台初始化相机服务...")
-        CameraSingleton.shared.initializeCamera { success in
-            NSLog("相机服务初始化结果: \(success)")
-        }
-    }
+    // 避免立即初始化相机，改为仅在用户首次打开相机页面时初始化
+    // 这有助于提高App启动速度和避免不必要的资源占用
+    // 相机初始化会延迟到用户通过Flutter代码调用时再执行
     
     GeneratedPluginRegistrant.register(with: self)
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
@@ -78,6 +80,13 @@ import AVFoundation
     
     if #available(iOS 13.0, *) {
       deviceTypes.append(.builtInUltraWideCamera)
+      
+      // 添加虚拟设备类型检查
+      deviceTypes.append(contentsOf: [
+        .builtInTripleCamera,
+        .builtInDualWideCamera,
+        .builtInDualCamera
+      ])
     }
     
     deviceTypes.append(.builtInTelephotoCamera)
@@ -96,6 +105,30 @@ import AVFoundation
     
     var hasUltraWide = false
     var hasTelephoto = false
+    var hasVirtualDeviceSupport = false
+    var virtualDeviceSwitchPoints: [CGFloat] = []
+    
+    // 检查是否支持虚拟设备
+    if #available(iOS 13.0, *) {
+      // 先检查是否有虚拟设备支持
+      for device in devices {
+        if device.position == .back {
+          if device.deviceType == .builtInTripleCamera || 
+             device.deviceType == .builtInDualWideCamera || 
+             device.deviceType == .builtInDualCamera {
+            hasVirtualDeviceSupport = true
+            
+            // 获取虚拟设备切换点
+            if let switchPoints = device.virtualDeviceSwitchOverVideoZoomFactors as? [NSNumber] {
+              virtualDeviceSwitchPoints = switchPoints.map { CGFloat($0.doubleValue) }
+            }
+            
+            // 如果找到虚拟设备，不需要继续查找
+            break
+          }
+        }
+      }
+    }
     
     for device in devices {
       switch device.position {
@@ -161,6 +194,10 @@ import AVFoundation
     
     if hasTelephoto {
       zoomOptions.append(2.0) // 长焦2x
+      // 一些高端设备可能有3x长焦
+      if virtualDeviceSwitchPoints.count > 1 && virtualDeviceSwitchPoints.last! > 2.5 {
+        zoomOptions.append(3.0)
+      }
     }
     
     // 支持的纵横比
@@ -173,6 +210,18 @@ import AVFoundation
     capabilities["hasTelephoto"] = hasTelephoto
     capabilities["allZoomOptions"] = zoomOptions
     capabilities["supportedRatios"] = supportedRatios
+    
+    // 添加虚拟设备支持信息
+    capabilities["hasVirtualDeviceSupport"] = hasVirtualDeviceSupport
+    capabilities["virtualDeviceSwitchPoints"] = virtualDeviceSwitchPoints
+    
+    // 添加设备信息
+    capabilities["deviceModel"] = deviceModel
+    capabilities["iOSVersion"] = UIDevice.current.systemVersion
+    
+    // 最大缩放倍率
+    let maxZoom: CGFloat = hasVirtualDeviceSupport ? 10.0 : 5.0
+    capabilities["maxZoomLevel"] = maxZoom
     
     result(capabilities)
   }

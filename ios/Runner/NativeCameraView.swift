@@ -196,7 +196,7 @@ class NativeCameraView: NSObject, FlutterPlatformView, FlutterStreamHandler {
     private func handleMethodCall(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         switch call.method {
         case "initialize":
-            CameraSingleton.shared.initializeCamera(result: result)
+            CameraSingleton.shared.initializeCamera(completionHandler: result)
             
         case "startPreview":
             CameraSingleton.shared.startPreview { success, error in
