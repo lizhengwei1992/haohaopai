@@ -10,6 +10,12 @@ class ZoomControl extends StatelessWidget {
   Future<void> setZoomLevel(double zoomLevel) async {
     final cameraState = CameraStateManager.instance;
 
+    // 如果是前置摄像头，强制设置为1.0倍缩放
+    if (cameraState.currentCameraType == 'front') {
+      await cameraState.setZoom(1.0);
+      return;
+    }
+
     // 使用CameraStateManager的方法设置缩放
     await cameraState.setZoom(zoomLevel);
   }
@@ -17,59 +23,13 @@ class ZoomControl extends StatelessWidget {
   // 处理缩放选项点击
   void _handleZoomOptionTap(String label) {
     final cameraState = CameraStateManager.instance;
+
+    // 前置摄像头禁用缩放功能
+    if (cameraState.currentCameraType == 'front') {
+      return;
+    }
+
     double zoomLevel = 1.0;
-
-    // 获取设备信息
-    final hasVirtualDeviceSupport = Platform.isIOS &&
-        (cameraState.cameraCapabilities['hasVirtualDeviceSupport'] ?? false);
-    final hasUltraWide =
-        cameraState.cameraCapabilities['hasUltraWide'] ?? false;
-
-    // 获取设备切换点
-    List<double> switchPoints = [];
-    if (hasVirtualDeviceSupport) {
-      final rawSwitchPoints =
-          cameraState.cameraCapabilities['virtualDeviceSwitchPoints'] ?? [];
-      if (rawSwitchPoints is List) {
-        switchPoints = List<double>.from(
-            rawSwitchPoints.map((x) => x is double ? x : x.toDouble()));
-      }
-    }
-
-    // 根据设备类型和切换点调整缩放值
-    if (hasVirtualDeviceSupport &&
-        hasUltraWide &&
-        switchPoints.isNotEmpty &&
-        switchPoints[0] == 2.0) {
-      // DualWideCamera设备需要特殊处理
-      if (label == '0.5×') {
-        zoomLevel = 1.0; // DualWideCamera的1.0对应超广角0.5x
-      } else if (label == '1×') {
-        zoomLevel = 2.0; // DualWideCamera的2.0对应广角1x
-      } else if (label == '2×') {
-        zoomLevel = 4.0; // DualWideCamera的4.0对应2x变焦
-      } else if (label == '3×') {
-        zoomLevel = 6.0; // DualWideCamera的6.0对应3x变焦
-      }
-    } else {
-      // 常规设备的标准处理
-      if (label == '0.5×') {
-        zoomLevel = 0.5;
-      } else if (label == '1×') {
-        zoomLevel = 1.0;
-      } else if (label == '2×') {
-        zoomLevel = 2.0;
-      } else if (label == '3×') {
-        zoomLevel = 3.0;
-      }
-    }
-
-    setZoomLevel(zoomLevel);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final cameraState = CameraStateManager.instance;
 
     // 获取设备信息
     final hasVirtualDeviceSupport = Platform.isIOS &&
@@ -93,6 +53,77 @@ class ZoomControl extends StatelessWidget {
         hasUltraWide &&
         switchPoints.isNotEmpty &&
         switchPoints[0] == 2.0;
+
+    // 根据相机类型和设备类型设置缩放因子
+    final cameraType = cameraState.currentCameraType;
+
+    if (cameraType == 'front') {
+      // 前置相机不进行缩放，始终保持1.0x
+      zoomLevel = 1.0;
+    } else if (isDualWideCamera) {
+      // 后置DualWideCamera设备需要特殊处理
+      if (label == '0.5×') {
+        zoomLevel = 1.0; // DualWideCamera的1.0对应超广角0.5x
+      } else if (label == '1×') {
+        zoomLevel = 2.0; // DualWideCamera的2.0对应广角1x
+      } else if (label == '2×') {
+        zoomLevel = 4.0; // DualWideCamera的4.0对应2x变焦
+      } else if (label == '3×') {
+        zoomLevel = 6.0; // DualWideCamera的6.0对应3x变焦
+      }
+    } else {
+      // 常规后置相机设备的标准处理
+      if (label == '0.5×') {
+        zoomLevel = 0.5;
+      } else if (label == '1×') {
+        zoomLevel = 1.0;
+      } else if (label == '2×') {
+        zoomLevel = 2.0;
+      } else if (label == '3×') {
+        zoomLevel = 3.0;
+      }
+    }
+
+    setZoomLevel(zoomLevel);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cameraState = CameraStateManager.instance;
+
+    // 检查是否是前置摄像头
+    final isFrontCamera = cameraState.currentCameraType == 'front';
+
+    // 如果是前置摄像头，不显示任何缩放控件
+    if (isFrontCamera) {
+      return const SizedBox.shrink();
+    }
+
+    // 获取设备信息
+    final hasVirtualDeviceSupport = Platform.isIOS &&
+        (cameraState.cameraCapabilities['hasVirtualDeviceSupport'] ?? false);
+    final hasUltraWide =
+        cameraState.cameraCapabilities['hasUltraWide'] ?? false;
+
+    // 获取设备切换点
+    List<double> switchPoints = [];
+    if (hasVirtualDeviceSupport) {
+      final rawSwitchPoints =
+          cameraState.cameraCapabilities['virtualDeviceSwitchPoints'] ?? [];
+      if (rawSwitchPoints is List) {
+        switchPoints = List<double>.from(
+            rawSwitchPoints.map((x) => x is double ? x : x.toDouble()));
+      }
+    }
+
+    // 判断是否是DualWideCamera设备
+    final isDualWideCamera = hasVirtualDeviceSupport &&
+        hasUltraWide &&
+        switchPoints.isNotEmpty &&
+        switchPoints[0] == 2.0;
+
+    // 检查设备是否支持0.5x缩放（超广角）
+    final supportsUltraWide = hasUltraWide || cameraState.minZoomLevel <= 0.5;
 
     // 使用 ValueListenableBuilder 来监听焦距变化
     return ValueListenableBuilder<double>(
@@ -147,20 +178,28 @@ class ZoomControl extends StatelessWidget {
                       ),
                     ),
                   ),
+
                   const SizedBox(width: 6),
-                  _buildZoomOption(
-                      '0.5×',
-                      isDualWideCamera
-                          ? (zoomLevel - 1.0).abs() <
-                              0.1 // DualWideCamera: 1.0 -> 0.5x
-                          : (zoomLevel - 0.5).abs() < 0.1), // 普通设备: 0.5 -> 0.5x
-                  const SizedBox(width: 6),
+                  // 只有支持超广角的设备显示0.5x选项
+                  if (supportsUltraWide) ...[
+                    _buildZoomOption(
+                        '0.5×',
+                        isDualWideCamera
+                            ? (zoomLevel - 1.0).abs() <
+                                0.1 // DualWideCamera: 1.0 -> 0.5x
+                            : (zoomLevel - 0.5).abs() <
+                                0.1), // 普通设备: 0.5 -> 0.5x
+                    const SizedBox(width: 6),
+                  ],
+
+                  // 标准1x选项始终显示
                   _buildZoomOption(
                       '1×',
                       isDualWideCamera
                           ? (zoomLevel - 2.0).abs() <
                               0.1 // DualWideCamera: 2.0 -> 1x
                           : (zoomLevel - 1.0).abs() < 0.1), // 普通设备: 1.0 -> 1x
+
                   const SizedBox(width: 6),
                   _buildZoomOption(
                       '2×',
@@ -168,6 +207,7 @@ class ZoomControl extends StatelessWidget {
                           ? (zoomLevel - 4.0).abs() <
                               0.1 // DualWideCamera: 4.0 -> 2x
                           : (zoomLevel - 2.0).abs() < 0.1), // 普通设备: 2.0 -> 2x
+
                   const SizedBox(width: 6),
                   _buildZoomOption(
                       '3×',
@@ -195,8 +235,8 @@ class ZoomControl extends StatelessWidget {
     return GestureDetector(
       onTap: () => _handleZoomOptionTap(label),
       child: Container(
-        width: 32,
-        height: 32,
+        width: 40, // 进一步增大宽度
+        height: 40, // 增大高度
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           color: isSelected
@@ -204,10 +244,14 @@ class ZoomControl extends StatelessWidget {
               : Colors.transparent,
         ),
         child: Center(
-          child: Text(
-            label,
-            style: textStyle,
-            textAlign: TextAlign.center,
+          // 使用FittedBox确保文本不会溢出
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              label,
+              style: textStyle,
+              textAlign: TextAlign.center,
+            ),
           ),
         ),
       ),

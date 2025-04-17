@@ -131,13 +131,65 @@ class _CameraScreenState extends State<CameraScreen>
     if (_nativeCameraController == null) return;
 
     try {
-      // 应用缩放设置
-      await _nativeCameraController!
-          .setZoomLevel(_stateManager.currentZoomLevel);
+      // 获取相机类型和设备信息
+      final cameraType = _stateManager.currentCameraType;
+      final hasVirtualDeviceSupport = Platform.isIOS &&
+          (_stateManager.cameraCapabilities['hasVirtualDeviceSupport'] ??
+              false);
+      final hasUltraWide =
+          _stateManager.cameraCapabilities['hasUltraWide'] ?? false;
+
+      // 获取设备切换点
+      List<double> switchPoints = [];
+      if (hasVirtualDeviceSupport) {
+        final rawSwitchPoints =
+            _stateManager.cameraCapabilities['virtualDeviceSwitchPoints'] ?? [];
+        if (rawSwitchPoints is List) {
+          switchPoints = List<double>.from(
+              rawSwitchPoints.map((x) => x is double ? x : x.toDouble()));
+        }
+      }
+
+      double zoomLevel = 1.0;
+
+      // 首次启动相机与返回相机页面逻辑区分处理
+      if (_stateManager.isFirstLaunch) {
+        // 首次启动时，设置默认缩放因子
+        if (cameraType == 'back') {
+          // 对于后置相机，如果是DualWideCamera，使用2.0作为缩放因子显示1.0x视角
+          if (hasVirtualDeviceSupport &&
+              hasUltraWide &&
+              switchPoints.isNotEmpty &&
+              switchPoints[0] == 2.0) {
+            zoomLevel = 2.0; // 对应1.0x广角
+          } else {
+            zoomLevel = 1.0; // 普通设备
+          }
+        } else if (cameraType == 'front') {
+          // 前置相机固定使用1.0缩放因子，显示为1.0x原始画面
+          zoomLevel = 1.0;
+        }
+
+        // 首次启动标志改为false
+        _stateManager.isFirstLaunch = false;
+      } else {
+        // 从其他页面返回相机页面时，恢复上次的缩放状态
+        if (cameraType == 'back') {
+          zoomLevel = _stateManager.lastBackCameraZoomLevel;
+        } else if (cameraType == 'front') {
+          zoomLevel = _stateManager.lastFrontCameraZoomLevel;
+        }
+        debugPrint(
+            '恢复上次${cameraType == 'back' ? '后置' : '前置'}相机缩放状态: $zoomLevel');
+      }
+
+      // 更新缩放级别
+      _stateManager.currentZoomLevel = zoomLevel;
+      await _nativeCameraController!.setZoomLevel(zoomLevel);
+      debugPrint('应用相机设置缩放级别: $zoomLevel');
 
       // 应用其他设置
       // 注意：这里可以添加更多设置的应用，如闪光灯、曝光等
-      // 目前NativeCameraController可能还没有这些方法
     } catch (e) {
       debugPrint('应用相机设置时出错: $e');
     }
@@ -151,6 +203,15 @@ class _CameraScreenState extends State<CameraScreen>
     Future.delayed(const Duration(milliseconds: 300), () {
       if (_nativeCameraController != null) {
         _nativeCameraController!.reconnectEventChannel();
+      }
+    });
+
+    // 延迟设置初始缩放，确保在相机视图完全加载并且事件通道连接后设置
+    Future.delayed(const Duration(milliseconds: 800), () {
+      if (_nativeCameraController != null) {
+        // 再次应用当前相机设置，确保缩放因子正确
+        _applyCurrentCameraSettings();
+        debugPrint('延迟应用相机设置完成');
       }
     });
   }
@@ -246,7 +307,34 @@ class _CameraScreenState extends State<CameraScreen>
           final mappedPosition = (position == 'front') ? 'front' : 'back';
           debugPrint('原生相机类型 $position 映射到 $mappedPosition');
 
+          // 保存上一个相机类型
+          final previousType = _stateManager.currentCameraType;
+
+          // 设置新的相机类型
           _stateManager.currentCameraType = mappedPosition;
+
+          // 如果相机类型发生了变化，重新应用缩放设置
+          if (previousType != mappedPosition) {
+            // 应用一个小延迟，等待UI更新
+            Future.delayed(const Duration(milliseconds: 100), () {
+              // 如果切换到前置相机，设置固定缩放为1.0 (前置摄像头原始画面)
+              if (mappedPosition == 'front') {
+                _stateManager.currentZoomLevel = 1.0;
+                if (_nativeCameraController != null) {
+                  _nativeCameraController!.setZoomLevel(1.0);
+                }
+              }
+              // 如果从前置切换回后置，确保应用保存的后置相机缩放
+              else if (previousType == 'front' && mappedPosition == 'back') {
+                double targetZoom = _stateManager.lastBackCameraZoomLevel;
+                _stateManager.currentZoomLevel = targetZoom;
+                if (_nativeCameraController != null) {
+                  _nativeCameraController!.setZoomLevel(targetZoom);
+                }
+              }
+            });
+          }
+
           // 确保前后置切换也重置状态
           if (_stateManager.isProcessingCameraChange) {
             _stateManager.isProcessingCameraChange = false;
@@ -289,6 +377,13 @@ class _CameraScreenState extends State<CameraScreen>
       case AppLifecycleState.resumed:
         debugPrint('应用回到前台，恢复相机');
         _nativeCameraController?.resumePreview();
+
+        // 应用回到前台时，重新应用相机设置
+        Future.delayed(const Duration(milliseconds: 300), () {
+          if (_nativeCameraController != null) {
+            _applyCurrentCameraSettings();
+          }
+        });
         break;
       case AppLifecycleState.inactive:
       case AppLifecycleState.paused:
@@ -381,10 +476,21 @@ class _CameraScreenState extends State<CameraScreen>
 
                                 // 保留缩放手势功能
                                 onScaleStart: (details) {
+                                  // 前置摄像头禁用缩放功能
+                                  if (_stateManager.currentCameraType ==
+                                      'front') {
+                                    return;
+                                  }
                                   _stateManager.baseScaleLevel =
                                       _stateManager.currentZoomLevel;
                                 },
                                 onScaleUpdate: (details) {
+                                  // 前置摄像头禁用缩放功能
+                                  if (_stateManager.currentCameraType ==
+                                      'front') {
+                                    return;
+                                  }
+
                                   // 增加判断：如果相机正在切换，则忽略缩放更新
                                   if (_stateManager.isCameraChanging) {
                                     debugPrint('相机正在切换，忽略本次缩放更新');
@@ -406,6 +512,11 @@ class _CameraScreenState extends State<CameraScreen>
                                   }
                                 },
                                 onScaleEnd: (details) {
+                                  // 前置摄像头禁用缩放功能
+                                  if (_stateManager.currentCameraType ==
+                                      'front') {
+                                    return;
+                                  }
                                   _stateManager.baseScaleLevel =
                                       _stateManager.currentZoomLevel;
                                 },
@@ -489,12 +600,14 @@ class _CameraScreenState extends State<CameraScreen>
                       ),
 
                     // 缩放控制（相机预览框下沿向上10px）
-                    Positioned(
-                      top: previewParams.zoomControlY - 40, // 位置调整，减去控件高度
-                      left: 0,
-                      right: 0,
-                      child: const ZoomControl(),
-                    ),
+                    if (_stateManager.currentCameraType != 'front') ...[
+                      Positioned(
+                        top: previewParams.zoomControlY - 40, // 位置调整，减去控件高度
+                        left: 0,
+                        right: 0,
+                        child: const ZoomControl(),
+                      ),
+                    ],
 
                     // 相机控制按钮行（相机预览框下沿向下10px）
                     Positioned(

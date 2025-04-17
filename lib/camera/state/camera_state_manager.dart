@@ -18,6 +18,11 @@ class CameraStateManager extends ChangeNotifier {
   bool _isCameraInitialized = false;
   String _currentCameraType = 'back'; // 默认使用后置相机
   bool _isProcessingCameraChange = false;
+  bool _isFirstLaunch = true; // 标记是否是首次启动相机
+
+  // 上一次相机状态 - 用于在返回相机页面时恢复状态
+  double _lastBackCameraZoomLevel = 2.0; // 默认后置相机缩放因子
+  double _lastFrontCameraZoomLevel = 2.0; // 默认前置相机缩放因子
 
   // 相机控制状态
   bool _isFlashOn = false;
@@ -57,6 +62,9 @@ class CameraStateManager extends ChangeNotifier {
   double get currentExposureValue => _currentExposureValue;
   double get minExposureValue => _minExposureValue;
   double get maxExposureValue => _maxExposureValue;
+  bool get isFirstLaunch => _isFirstLaunch;
+  double get lastBackCameraZoomLevel => _lastBackCameraZoomLevel;
+  double get lastFrontCameraZoomLevel => _lastFrontCameraZoomLevel;
 
   // Setters
   set isCameraInitialized(bool value) {
@@ -94,6 +102,14 @@ class CameraStateManager extends ChangeNotifier {
     }
     _currentZoomLevel = value;
     currentZoomLevelNotifier.value = value;
+
+    // 保存上次的缩放值，用于页面切换回相机时恢复
+    if (_currentCameraType == 'back') {
+      _lastBackCameraZoomLevel = value;
+    } else if (_currentCameraType == 'front') {
+      _lastFrontCameraZoomLevel = value;
+    }
+
     notifyListeners();
   }
 
@@ -168,6 +184,21 @@ class CameraStateManager extends ChangeNotifier {
 
   set maxExposureValue(double value) {
     _maxExposureValue = value;
+    notifyListeners();
+  }
+
+  set isFirstLaunch(bool value) {
+    _isFirstLaunch = value;
+    notifyListeners();
+  }
+
+  set lastBackCameraZoomLevel(double value) {
+    _lastBackCameraZoomLevel = value;
+    notifyListeners();
+  }
+
+  set lastFrontCameraZoomLevel(double value) {
+    _lastFrontCameraZoomLevel = value;
     notifyListeners();
   }
 
@@ -432,6 +463,52 @@ class CameraStateManager extends ChangeNotifier {
           _currentCameraType = toFront ? 'front' : 'back';
           debugPrint('相机类型已更新: $_currentCameraType');
 
+          // 如果从前置切换回后置相机，恢复上次保存的后置相机缩放级别
+          if (!toFront) {
+            // 检查是否支持虚拟相机
+            final hasVirtualDeviceSupport =
+                _cameraCapabilities['hasVirtualDeviceSupport'] ?? false;
+            final hasUltraWide = _cameraCapabilities['hasUltraWide'] ?? false;
+
+            // 使用上一次保存的后置相机缩放级别，如果没有保存过，则使用默认值
+            double targetZoom;
+
+            // 如果已经保存了后置相机的缩放因子，使用它
+            if (_lastBackCameraZoomLevel > 0) {
+              targetZoom = _lastBackCameraZoomLevel;
+              debugPrint('恢复后置相机上次的缩放因子: $targetZoom');
+            }
+            // 否则使用默认值
+            else if (hasVirtualDeviceSupport && hasUltraWide) {
+              // 获取虚拟设备切换点
+              final switchPoints =
+                  _cameraCapabilities['virtualDeviceSwitchPoints'] ?? [];
+              if (switchPoints is List &&
+                  switchPoints.isNotEmpty &&
+                  switchPoints[0] == 2.0) {
+                // 使用2.0作为默认缩放因子，对应iOS相机中的1x标准广角
+                targetZoom = 2.0;
+              } else {
+                targetZoom = 1.0;
+              }
+            } else {
+              // 普通设备使用1.0
+              targetZoom = 1.0;
+            }
+
+            // 应用缩放级别
+            _currentZoomLevel = targetZoom;
+            currentZoomLevelNotifier.value = targetZoom;
+            await setZoom(targetZoom);
+            debugPrint('切换到后置摄像头，设置缩放为: $targetZoom');
+          } else {
+            // 切换到前置相机，固定使用1.0缩放因子（前置摄像头1.0对应原始画面）
+            _currentZoomLevel = 1.0;
+            currentZoomLevelNotifier.value = 1.0;
+            await setZoom(1.0);
+            debugPrint('切换到前置摄像头，固定缩放为1.0（原始画面）');
+          }
+
           // 在事件处理时会将isProcessingCameraChange设为false
           // 如果没有收到事件，5秒后自动重置状态
           Future.delayed(const Duration(seconds: 5), () {
@@ -491,6 +568,17 @@ class CameraStateManager extends ChangeNotifier {
 
   /// 设置缩放级别，使用iOS虚拟摄像头实现丝滑缩放
   Future<void> setZoom(double value) async {
+    // 如果是前置摄像头，强制固定缩放为1.0
+    if (_currentCameraType == 'front') {
+      value = 1.0;
+      // 更新状态但不调用原生方法
+      _currentZoomLevel = 1.0;
+      currentZoomLevelNotifier.value = 1.0;
+      notifyListeners();
+      debugPrint('前置摄像头，固定缩放为1.0');
+      return;
+    }
+
     // 确保值在范围内
     if (value < _minZoomLevel) {
       value = _minZoomLevel;
