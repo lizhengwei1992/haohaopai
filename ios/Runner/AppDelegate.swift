@@ -2,6 +2,8 @@ import Flutter
 import UIKit
 import AVFoundation
 import UserNotifications
+import Photos
+import PhotosUI
 // 不需要导入外部模块，这些Swift文件在同一个项目中
 
 // 备注: 我们移除了有类型问题的扩展，改为在应用中管理事件通道的生命周期
@@ -65,6 +67,60 @@ import UserNotifications
     // 相机初始化会延迟到用户通过Flutter代码调用时再执行
     
     GeneratedPluginRegistrant.register(with: self)
+    
+    // 注册创建相册的Method Channel
+    let methodChannelAlbum = FlutterMethodChannel(name: "com.haohaopai.app/album", binaryMessenger: controller.binaryMessenger)
+    methodChannelAlbum.setMethodCallHandler { [weak self] (call, result) in
+        guard let self = self else { return }
+        
+        if call.method == "createAlbum" {
+            let albumName = call.arguments as? String ?? "好好拍"
+            self.createAlbumIfNeeded(albumName: albumName) { success, error in
+                if success {
+                    result(true)
+                } else {
+                    result(FlutterError(code: "ALBUM_CREATE_ERROR", 
+                                      message: error ?? "无法创建相册", 
+                                      details: nil))
+                }
+            }
+        } else if call.method == "savePhotoToAlbum" {
+            guard let arguments = call.arguments as? [String: Any],
+                  let imageData = arguments["imageData"] as? FlutterStandardTypedData,
+                  let albumName = arguments["albumName"] as? String else {
+                result(FlutterError(code: "INVALID_ARGUMENTS", 
+                                  message: "参数无效", 
+                                  details: nil))
+                return
+            }
+            
+            self.saveImageToAlbum(imageData: imageData.data, albumName: albumName) { success, error in
+                if success {
+                    result(true)
+                } else {
+                    result(FlutterError(code: "SAVE_ERROR", 
+                                      message: error ?? "无法保存照片", 
+                                      details: nil))
+                }
+            }
+        } else {
+            result(FlutterMethodNotImplemented)
+        }
+    }
+    
+    // 应用启动时直接创建相册
+    requestPhotoLibraryPermission { [weak self] granted in
+        if granted {
+            self?.createAlbumIfNeeded(albumName: "好好拍") { success, error in
+                if success {
+                    print("已成功创建或确认存在好好拍相册")
+                } else {
+                    print("创建相册失败: \(error ?? "未知错误")")
+                }
+            }
+        }
+    }
+    
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
   
@@ -277,8 +333,128 @@ import UserNotifications
     // 记录应用进入后台状态
     NSLog("应用即将进入非活跃状态，准备暂停通信通道")
     
+    // 清理所有正在处理的照片捕获器
+    PhotoCaptureProcessor.cleanupActiveProcessors()
+    
     // 通知相机单例应用即将进入后台
     CameraSingleton.shared.applicationWillResignActive()
+  }
+  
+  // 请求相册权限
+  private func requestPhotoLibraryPermission(completion: @escaping (Bool) -> Void) {
+    PHPhotoLibrary.requestAuthorization { status in
+        DispatchQueue.main.async {
+            completion(status == .authorized)
+        }
+    }
+  }
+  
+  // 创建相册（如果不存在）
+  private func createAlbumIfNeeded(albumName: String, completion: @escaping (Bool, String?) -> Void) {
+    print("开始检查/创建相册: \(albumName)")
+    
+    // 先检查相册是否已存在
+    let fetchOptions = PHFetchOptions()
+    fetchOptions.predicate = NSPredicate(format: "title = %@", albumName)
+    let collection = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: fetchOptions)
+    
+    print("查找相册结果: 找到 \(collection.count) 个相册")
+    
+    if collection.count > 0 {
+        // 相册已存在
+        print("相册已存在: \(albumName), ID: \(collection.firstObject?.localIdentifier ?? "未知")")
+        completion(true, nil)
+        return
+    }
+    
+    // 创建新相册
+    var assetCollectionPlaceholder: PHObjectPlaceholder?
+    
+    print("开始创建新相册: \(albumName)")
+    PHPhotoLibrary.shared().performChanges({
+        let createAlbumRequest = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: albumName)
+        assetCollectionPlaceholder = createAlbumRequest.placeholderForCreatedAssetCollection
+        print("创建相册请求已提交")
+    }, completionHandler: { success, error in
+        DispatchQueue.main.async {
+            if success {
+                print("成功创建相册: \(albumName), 占位符ID: \(assetCollectionPlaceholder?.localIdentifier ?? "未知")")
+                completion(true, nil)
+            } else {
+                print("创建相册失败: \(error?.localizedDescription ?? "未知错误")")
+                completion(false, error?.localizedDescription)
+            }
+        }
+    })
+  }
+  
+  // 保存照片到指定相册
+  private func saveImageToAlbum(imageData: Data, albumName: String, completion: @escaping (Bool, String?) -> Void) {
+    print("开始保存照片到相册: \(albumName), 数据大小: \(imageData.count) 字节")
+    
+    guard let image = UIImage(data: imageData) else {
+        print("无效的图片数据，无法转换为UIImage")
+        completion(false, "无效的图片数据")
+        return
+    }
+    
+    print("成功将数据转换为UIImage: \(image.size.width) x \(image.size.height)")
+    
+    // 查找指定相册
+    let fetchOptions = PHFetchOptions()
+    fetchOptions.predicate = NSPredicate(format: "title = %@", albumName)
+    let collection = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: fetchOptions)
+    
+    print("查找相册结果: 找到 \(collection.count) 个相册")
+    
+    guard let album = collection.firstObject else {
+        print("未找到相册: \(albumName)，尝试创建")
+        // 如果相册不存在，先创建
+        createAlbumIfNeeded(albumName: albumName) { [weak self] success, error in
+            if success {
+                print("相册创建成功，再次尝试保存照片")
+                // 相册创建成功，再次尝试保存
+                self?.saveImageToAlbum(imageData: imageData, albumName: albumName, completion: completion)
+            } else {
+                print("无法创建相册: \(error ?? "未知错误")")
+                completion(false, "无法创建相册: \(error ?? "未知错误")")
+            }
+        }
+        return
+    }
+    
+    print("找到相册: \(albumName), ID: \(album.localIdentifier)")
+    
+    // 保存照片到相册
+    var assetPlaceholder: PHObjectPlaceholder?
+    
+    print("开始执行照片保存操作")
+    PHPhotoLibrary.shared().performChanges({
+        // 创建照片资源
+        let createAssetRequest = PHAssetChangeRequest.creationRequestForAsset(from: image)
+        assetPlaceholder = createAssetRequest.placeholderForCreatedAsset
+        print("照片资产创建请求已提交")
+        
+        if let assetPlaceholder = assetPlaceholder {
+            // 将照片添加到相册
+            let albumChangeRequest = PHAssetCollectionChangeRequest(for: album)
+            print("准备将照片添加到相册")
+            albumChangeRequest?.addAssets([assetPlaceholder] as NSFastEnumeration)
+            print("照片添加到相册请求已提交")
+        } else {
+            print("警告: 资产占位符为空")
+        }
+    }, completionHandler: { success, error in
+        DispatchQueue.main.async {
+            if success {
+                print("照片成功保存到相册: \(albumName)")
+                completion(true, nil)
+            } else {
+                print("保存照片到相册失败: \(error?.localizedDescription ?? "未知错误")")
+                completion(false, error?.localizedDescription)
+            }
+        }
+    })
   }
 }
 

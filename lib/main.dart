@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'camera/services/camera_service.dart';
+import 'camera/services/album_service.dart';
 import 'camera/state/camera_state_manager.dart';
 import 'camera/screens/camera_screen.dart';
 import 'home/home.dart';
@@ -23,11 +24,8 @@ Future<void> main() async {
     DeviceOrientation.portraitDown,
   ]);
 
-  // 请求相机权限
-  final cameraStatus = await Permission.camera.request();
-  if (cameraStatus.isDenied) {
-    debugPrint('相机权限被拒绝');
-  }
+  // 请求必要权限
+  await requestPermissions();
 
   // 启动应用
   runApp(
@@ -40,18 +38,48 @@ Future<void> main() async {
     ),
   );
 
-  // 在应用启动后的后台初始化相机，不阻塞UI
+  // 在应用启动后的后台进行初始化，不阻塞UI
   if (Platform.isIOS) {
     // 使用微任务确保它不会阻塞主UI线程，但会在当前帧结束后立即执行
     Future.microtask(() async {
       try {
+        // 初始化相机
         debugPrint('开始在后台初始化相机...');
-        final success = await CameraService.instance.initializeCamera();
-        debugPrint('相机初始化${success ? '成功' : '失败'}');
+        final cameraSuccess = await CameraService.instance.initializeCamera();
+        debugPrint('相机初始化${cameraSuccess ? '成功' : '失败'}');
+
+        // 初始化相册服务
+        debugPrint('开始初始化好好拍相册...');
+        final albumSuccess = await AlbumService().initAlbum();
+        debugPrint('好好拍相册初始化${albumSuccess ? '成功' : '失败'}');
       } catch (e) {
-        debugPrint('相机初始化出错: $e');
+        debugPrint('初始化出错: $e');
       }
     });
+  }
+}
+
+/// 请求所有必要权限
+Future<void> requestPermissions() async {
+  // 相机权限
+  final cameraStatus = await Permission.camera.request();
+  if (cameraStatus.isDenied) {
+    debugPrint('相机权限被拒绝');
+  }
+
+  // 照片权限
+  if (Platform.isIOS) {
+    // iOS特定的相册权限
+    final photosStatus = await Permission.photos.request();
+    if (photosStatus.isDenied) {
+      debugPrint('相册权限被拒绝');
+    }
+  } else {
+    // Android存储权限
+    final storageStatus = await Permission.storage.request();
+    if (storageStatus.isDenied) {
+      debugPrint('存储权限被拒绝');
+    }
   }
 }
 

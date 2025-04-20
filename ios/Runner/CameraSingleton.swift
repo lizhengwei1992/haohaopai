@@ -856,75 +856,118 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     
     /// 拍照
     func capturePhoto(completion: @escaping (Data?, String?) -> Void) {
+        print("【拍照流程】1. 拍照方法开始执行")
         guard isInitialized, isRunning, let photoOutput = photoOutput else {
+            print("【拍照流程】错误：相机未初始化或未运行，isInitialized=\(isInitialized), isRunning=\(isRunning), photoOutput=\(photoOutput == nil ? "nil" : "有值")")
             completion(nil, "相机未初始化或未运行")
             return
         }
         
+        print("【拍照流程】2. 相机状态检查通过")
+        
         // 确保有可用的视频连接
         guard let videoConnection = photoOutput.connection(with: .video) else {
+            print("【拍照流程】错误：无法获取视频连接")
             completion(nil, "无法获取视频连接")
             return
         }
         
+        print("【拍照流程】3. 获取视频连接成功")
+        
         // 创建拍照设置
         let settings = AVCapturePhotoSettings()
+        print("【拍照流程】4. 创建拍照设置完成")
         
         // 检查当前设备是否为虚拟设备
         let isVirtualDevice = false
         if #available(iOS 13.0, *), let device = currentDevice {
+            print("【拍照流程】5. 当前设备类型: \(device.deviceType.rawValue)")
             if device.deviceType == .builtInTripleCamera || 
                device.deviceType == .builtInDualWideCamera || 
                device.deviceType == .builtInDualCamera {
                 // 对于虚拟设备，使用高质量拍照设置
                 settings.isHighResolutionPhotoEnabled = true
+                print("【拍照流程】设置高分辨率拍照")
                 
                 // 如果当前缩放是超广角范围(0.5x)，确保正确捕获
                 if currentZoomFactor < 1.0 && hasUltraWideCamera {
                     // 超广角模式下自动应用
-                    print("在虚拟摄像头超广角模式下拍照")
+                    print("【拍照流程】在虚拟摄像头超广角模式下拍照")
                 } else if currentZoomFactor >= 2.5 && hasTelephotoCamera {
                     // 长焦模式下自动应用
-                    print("在虚拟摄像头长焦模式下拍照")
+                    print("【拍照流程】在虚拟摄像头长焦模式下拍照")
                 } else {
                     // 广角模式下自动应用
-                    print("在虚拟摄像头广角模式下拍照")
+                    print("【拍照流程】在虚拟摄像头广角模式下拍照")
                 }
             }
         }
         
+        print("【拍照流程】6. 检查闪光灯支持")
         // 检查是否支持闪光灯
         if let device = currentDevice, device.hasFlash && device.isFlashAvailable {
             if #available(iOS 10.0, *) {
                 // 检查闪光灯模式支持
                 if photoOutput.supportedFlashModes.contains(.auto) {
                     settings.flashMode = .auto
+                    print("【拍照流程】设置闪光灯为自动模式")
                 }
             } else {
                 settings.flashMode = .auto
+                print("【拍照流程】设置闪光灯为自动模式(旧版iOS)")
             }
         }
         
         // 设置高质量照片捕获
         settings.isHighResolutionPhotoEnabled = true
+        print("【拍照流程】7. 设置高分辨率拍照完成")
         
         // 创建照片捕获代理
-        let photoCaptureProcessor = PhotoCaptureProcessor { (data, error) in
-            if let error = error {
-                completion(nil, "拍照失败: \(error.localizedDescription)")
-                return
-            }
-            
-            guard let data = data else {
-                completion(nil, "拍照数据为空")
-                return
-            }
-            
-            completion(data, nil)
-        }
+        print("【拍照流程】8. 创建照片捕获代理")
         
-        // 执行拍照
-        photoOutput.capturePhoto(with: settings, delegate: photoCaptureProcessor)
+        // 为确保回调被正确触发，先添加到主队列延迟执行
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else {
+                print("【拍照流程】错误：相机单例已被释放")
+                completion(nil, "相机单例已被释放")
+                return
+            }
+            
+            guard let photoOutput = self.photoOutput else {
+                print("【拍照流程】错误：photoOutput在主线程中变为nil")
+                completion(nil, "photoOutput在主线程中变为nil")
+                return
+            }
+            
+            // 创建照片捕获处理器
+            let photoCaptureProcessor = PhotoCaptureProcessor { (data, error) in
+                if let error = error {
+                    print("【拍照流程】错误：拍照失败 - \(error.localizedDescription)")
+                    DispatchQueue.main.async {
+                        completion(nil, "拍照失败: \(error.localizedDescription)")
+                    }
+                    return
+                }
+                
+                guard let data = data else {
+                    print("【拍照流程】错误：拍照数据为空")
+                    DispatchQueue.main.async {
+                        completion(nil, "拍照数据为空")
+                    }
+                    return
+                }
+                
+                print("【拍照流程】12. 成功获取照片数据，大小: \(data.count) 字节")
+                DispatchQueue.main.async {
+                    completion(data, nil)
+                }
+            }
+            
+            // 执行拍照
+            print("【拍照流程】9. 执行拍照操作")
+            photoOutput.capturePhoto(with: settings, delegate: photoCaptureProcessor)
+            print("【拍照流程】10. 拍照操作已提交，等待回调...")
+        }
     }
     
     /// 检查当前是否是前置相机
@@ -1504,23 +1547,47 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
 class PhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelegate {
     private let completion: (Data?, Error?) -> Void
     
+    // 添加一个静态数组存储当前活跃的处理器实例，防止被过早释放
+    private static var activeProcessors = [PhotoCaptureProcessor]()
+    
     init(completion: @escaping (Data?, Error?) -> Void) {
         self.completion = completion
         super.init()
+        print("【拍照流程】创建PhotoCaptureProcessor实例")
+        
+        // 将自己加入到活跃处理器列表
+        PhotoCaptureProcessor.activeProcessors.append(self)
     }
     
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+        print("【拍照流程】11. didFinishProcessingPhoto回调被调用")
+        
         if let error = error {
+            print("【拍照流程】处理照片时出错: \(error.localizedDescription)")
             completion(nil, error)
-            return
+        } else {
+            // 获取照片数据
+            if let imageData = photo.fileDataRepresentation() {
+                print("【拍照流程】成功获取照片数据，大小: \(imageData.count) 字节")
+                completion(imageData, nil)
+            } else {
+                print("【拍照流程】无法获取照片数据表示")
+                let error = NSError(domain: "com.haohaopai.app", code: 1006, userInfo: [NSLocalizedDescriptionKey: "无法获取照片数据"])
+                completion(nil, error)
+            }
         }
         
-        // 获取照片数据
-        guard let imageData = photo.fileDataRepresentation() else {
-            completion(nil, NSError(domain: "com.haohaopai.app", code: 1006, userInfo: [NSLocalizedDescriptionKey: "无法获取照片数据"]))
-            return
+        // 处理完成后从活跃处理器列表中移除自己
+        if let index = PhotoCaptureProcessor.activeProcessors.firstIndex(where: { $0 === self }) {
+            PhotoCaptureProcessor.activeProcessors.remove(at: index)
+            print("【拍照流程】处理器已从活跃列表移除，当前活跃处理器数量: \(PhotoCaptureProcessor.activeProcessors.count)")
         }
-        
-        completion(imageData, nil)
+    }
+    
+    // 添加一个方法用于在应用程序状态变化时清理
+    class func cleanupActiveProcessors() {
+        let count = activeProcessors.count
+        activeProcessors.removeAll()
+        print("【拍照流程】清理了 \(count) 个活跃的照片处理器")
     }
 } 
