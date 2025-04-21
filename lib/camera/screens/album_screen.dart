@@ -2,13 +2,13 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
-import 'image_preview_screen.dart';
+import 'photo_view.dart';
 
-/// 相册浏览页面
-class AlbumGalleryScreen extends StatelessWidget {
+/// 相册页面
+class AlbumScreen extends StatelessWidget {
   final List<AssetEntity> photos;
 
-  const AlbumGalleryScreen({
+  const AlbumScreen({
     Key? key,
     required this.photos,
   }) : super(key: key);
@@ -80,8 +80,44 @@ class AlbumGalleryScreen extends StatelessWidget {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => ImagePreviewScreen(
+            builder: (context) => PhotoViewScreen(
               imagePath: file.path,
+              allPhotos: photos,
+              initialIndex: photos.indexOf(photo),
+              onDelete: () async {
+                try {
+                  // 删除照片
+                  final result =
+                      await PhotoManager.editor.deleteWithIds([photo.id]);
+                  if (result.isNotEmpty) {
+                    // 如果删除成功，显示提示
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('照片已删除')),
+                      );
+                    }
+                  } else {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('删除照片失败')),
+                      );
+                    }
+                  }
+                } catch (e) {
+                  debugPrint('删除照片失败: $e');
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('删除照片失败: $e')),
+                    );
+                  }
+                }
+              },
+              onShare: () {
+                // 这里可以添加分享功能
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('分享功能即将上线')),
+                );
+              },
             ),
           ),
         );
