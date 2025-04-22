@@ -1688,51 +1688,67 @@ class PhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelegate {
     
     // 将图像裁剪为16:9比例 (竖屏下的9:16)
     private func cropImageTo16by9(_ image: UIImage) -> UIImage? {
-        let sourceWidth = image.size.width
-        let sourceHeight = image.size.height
-        print("【9:16 裁剪】开始 - 原始尺寸: \(sourceWidth)x\(sourceHeight)") // 竖屏尺寸，例如 3024x4032
-
-        // 目标是 9:16 竖屏比例，保持高度不变，裁剪宽度
-        let targetWidth = sourceHeight * 9.0 / 16.0
-
-        // 确保目标宽度不超过原始宽度
-        guard targetWidth <= sourceWidth else {
-            print("【9:16 裁剪】错误：计算出的目标宽度(\(targetWidth))大于原始宽度(\(sourceWidth))")
-            return image // 避免裁剪错误，返回原图
+        // 获取图像的物理尺寸（考虑方向）
+        let isPortrait = isImagePortrait(image)
+        let physicalSize = getPhysicalSize(image)
+        let sourceWidth = physicalSize.width
+        let sourceHeight = physicalSize.height
+        
+        print("【16:9 裁剪】开始 - 原始尺寸: \(sourceWidth)x\(sourceHeight), 方向: \(isPortrait ? "竖向" : "横向")")
+        
+        // 确定长边和短边
+        let longSide = max(sourceWidth, sourceHeight)
+        let shortSide = min(sourceWidth, sourceHeight)
+        
+        // 计算16:9比例下的新尺寸
+        // 保持长边不变，计算短边应该的长度
+        let targetShortSide = longSide * 9.0 / 16.0
+        
+        var cropRect: CGRect
+        
+        if isPortrait {
+            // 竖向图片：高度是长边，宽度是短边
+            // 裁剪左右，保持高度不变
+            let targetWidth = sourceHeight * 9.0 / 16.0
+            let xOffset = (sourceWidth - targetWidth) / 2.0
+            cropRect = CGRect(x: xOffset, y: 0, width: targetWidth, height: sourceHeight)
+            print("【16:9 裁剪】竖向模式 - 裁剪左右，保持高度\(sourceHeight)不变，目标宽度: \(targetWidth)")
+        } else {
+            // 横向图片：宽度是长边，高度是短边
+            // 裁剪上下，保持宽度不变
+            let targetHeight = sourceWidth * 9.0 / 16.0
+            let yOffset = (sourceHeight - targetHeight) / 2.0
+            cropRect = CGRect(x: 0, y: yOffset, width: sourceWidth, height: targetHeight)
+            print("【16:9 裁剪】横向模式 - 裁剪上下，保持宽度\(sourceWidth)不变，目标高度: \(targetHeight)")
         }
-
-        let xOffset = (sourceWidth - targetWidth) / 2.0
-        // 确保 xOffset 不为负数
-        let finalXOffset = max(0, xOffset)
-
-        let cropRect = CGRect(x: finalXOffset, y: 0, width: targetWidth, height: sourceHeight)
-        print("【9:16 裁剪】目标宽度: \(targetWidth), X偏移: \(finalXOffset), 裁剪区域: \(cropRect)")
-
+        
+        print("【16:9 裁剪】裁剪区域: \(cropRect)")
+        
+        // 执行裁剪，保持原始方向
         return cropImage(image, toRect: cropRect)
     }
 
     // 将图像裁剪为正方形 (1:1)
     private func cropImageToSquare(_ image: UIImage) -> UIImage? {
-        let sourceWidth = image.size.width
-        let sourceHeight = image.size.height
-        print("【1:1 裁剪】开始 - 原始尺寸: \(sourceWidth)x\(sourceHeight)") // 竖屏尺寸，例如 3024x4032
-
-        // 目标是 1:1 正方形，保持宽度不变，裁剪高度
-        let targetHeight = sourceWidth // 正方形的边长等于原始宽度
-
-        // 确保目标高度不超过原始高度
-        guard targetHeight <= sourceHeight else {
-            print("【1:1 裁剪】错误：计算出的目标高度(\(targetHeight))大于原始高度(\(sourceHeight))")
-            return image // 避免裁剪错误，返回原图
-        }
-
-        let yOffset = (sourceHeight - targetHeight) / 2.0
-        // 确保 yOffset 不为负数
-        let finalYOffset = max(0, yOffset)
-
-        let cropRect = CGRect(x: 0, y: finalYOffset, width: sourceWidth, height: targetHeight)
-        print("【1:1 裁剪】目标高度: \(targetHeight), Y偏移: \(finalYOffset), 裁剪区域: \(cropRect)")
-
+        // 获取图像的物理尺寸（考虑方向）
+        let isPortrait = isImagePortrait(image)
+        let physicalSize = getPhysicalSize(image)
+        let sourceWidth = physicalSize.width
+        let sourceHeight = physicalSize.height
+        
+        print("【1:1 裁剪】开始 - 原始尺寸: \(sourceWidth)x\(sourceHeight), 方向: \(isPortrait ? "竖向" : "横向")")
+        
+        // 使用较短边作为正方形边长
+        let squareSize = min(sourceWidth, sourceHeight)
+        
+        // 计算偏移量以居中裁剪
+        let xOffset = (sourceWidth - squareSize) / 2.0
+        let yOffset = (sourceHeight - squareSize) / 2.0
+        
+        let cropRect = CGRect(x: xOffset, y: yOffset, width: squareSize, height: squareSize)
+        print("【1:1 裁剪】正方形边长: \(squareSize), 偏移: (\(xOffset), \(yOffset)), 裁剪区域: \(cropRect)")
+        
+        // 执行裁剪，保持原始方向
         return cropImage(image, toRect: cropRect)
     }
     
@@ -1740,26 +1756,51 @@ class PhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelegate {
     private func cropImage(_ image: UIImage, toRect cropRect: CGRect) -> UIImage? {
         guard let cgImage = image.cgImage else { return nil }
         
-        let contextImage = UIImage(cgImage: cgImage)
-        
-        // 确保裁剪区域在图像范围内
-        let imageRect = CGRect(x: 0, y: 0, width: contextImage.size.width, height: contextImage.size.height)
-        let finalRect = cropRect.intersection(imageRect)
+        // 考虑图像的方向
+        let orientation = image.imageOrientation
         
         // 计算裁剪区域（考虑UIImage的scale）
         let scaledRect = CGRect(
-            x: finalRect.origin.x * image.scale,
-            y: finalRect.origin.y * image.scale,
-            width: finalRect.size.width * image.scale,
-            height: finalRect.size.height * image.scale
+            x: cropRect.origin.x * image.scale,
+            y: cropRect.origin.y * image.scale,
+            width: cropRect.size.width * image.scale,
+            height: cropRect.size.height * image.scale
         )
         
         // 裁剪图像
         if let croppedCGImage = cgImage.cropping(to: scaledRect) {
-            return UIImage(cgImage: croppedCGImage, scale: image.scale, orientation: image.imageOrientation)
+            // 创建新图像时保持原始方向
+            return UIImage(cgImage: croppedCGImage, scale: image.scale, orientation: orientation)
         }
         
         return nil
+    }
+    
+    // 检查图像是否为竖向
+    private func isImagePortrait(_ image: UIImage) -> Bool {
+        // 考虑图像方向
+        switch image.imageOrientation {
+        case .left, .right, .leftMirrored, .rightMirrored:
+            // 这些方向下，宽高是交换的
+            return image.size.width > image.size.height
+        default:
+            // 正常情况下，高>宽为竖向
+            return image.size.height > image.size.width
+        }
+    }
+    
+    // 获取考虑方向后的物理尺寸
+    private func getPhysicalSize(_ image: UIImage) -> CGSize {
+        let size = image.size
+        
+        // 考虑图像方向
+        switch image.imageOrientation {
+        case .left, .right, .leftMirrored, .rightMirrored:
+            // 这些方向下，宽高是交换的
+            return CGSize(width: size.height, height: size.width)
+        default:
+            return size
+        }
     }
     
     // 添加一个方法用于在应用程序状态变化时清理
