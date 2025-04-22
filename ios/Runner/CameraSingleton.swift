@@ -16,6 +16,9 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     private var isRunning = false
     var currentPosition: AVCaptureDevice.Position = .back
     
+    // 当前纵横比设置
+    private var currentAspectRatio: String = "4:3"
+    
     // 初始化完成回调列表
     private var initializationCompletionHandlers: [(Bool) -> Void] = []
     
@@ -854,6 +857,29 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         }
     }
     
+    /// 设置拍摄比例
+    func setAspectRatio(_ ratio: String, completion: ((Bool, String?) -> Void)? = nil) {
+        guard ["4:3", "1:1", "16:9"].contains(ratio) else {
+            print("【拍照流程】错误：不支持的比例设置: \(ratio)")
+            completion?(false, "不支持的比例设置: \(ratio)")
+            return
+        }
+        
+        print("【拍照流程】设置拍摄比例: \(ratio)")
+        currentAspectRatio = ratio
+        
+        // 应用纵横比设置，这里只记录值，在拍照时应用
+        // 预览层的纵横比由 Flutter 端控制
+        
+        // 发送事件通知前端比例已更改
+        sendEvent(type: "aspectRatioChanged", data: [
+            "aspectRatio": ratio,
+            "success": true
+        ])
+        
+        completion?(true, nil)
+    }
+    
     /// 拍照
     func capturePhoto(completion: @escaping (Data?, String?) -> Void) {
         print("【拍照流程】1. 拍照方法开始执行")
@@ -877,6 +903,47 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         // 创建拍照设置
         let settings = AVCapturePhotoSettings()
         print("【拍照流程】4. 创建拍照设置完成")
+        
+        // 应用当前设置的拍摄比例
+        if currentAspectRatio != "4:3" {
+            print("【拍照流程】应用自定义拍摄比例: \(currentAspectRatio)")
+            
+            // 根据比例设置裁剪区域
+            var cropRect: CGRect?
+            if #available(iOS 11.0, *) {
+                // 获取传感器尺寸
+                let dimensions = CMVideoFormatDescriptionGetDimensions(currentDevice!.activeFormat.formatDescription)
+                let sensorWidth = CGFloat(dimensions.width)
+                let sensorHeight = CGFloat(dimensions.height)
+                
+                // 计算不同比例下的裁剪区域
+                switch currentAspectRatio {
+                case "16:9":
+                    // 保持宽度不变，调整高度以匹配16:9比例
+                    let targetHeight = sensorWidth * 9.0 / 16.0
+                    let yOffset = (sensorHeight - targetHeight) / 2.0
+                    cropRect = CGRect(x: 0, y: yOffset, width: sensorWidth, height: targetHeight)
+                    print("【拍照流程】设置16:9裁剪区域: \(cropRect!)")
+                    
+                case "1:1":
+                    // 以短边为准创建正方形区域
+                    let minDimension = min(sensorWidth, sensorHeight)
+                    let xOffset = (sensorWidth - minDimension) / 2.0
+                    let yOffset = (sensorHeight - minDimension) / 2.0
+                    cropRect = CGRect(x: xOffset, y: yOffset, width: minDimension, height: minDimension)
+                    print("【拍照流程】设置1:1裁剪区域: \(cropRect!)")
+                    
+                default:
+                    break // 使用默认的4:3
+                }
+                
+                // 存储裁剪区域，在处理照片数据时使用
+                // AVCapturePhotoSettings 没有 cropRect 属性，我们会在回调中处理裁剪
+                print("【拍照流程】注意：将在拍照完成后使用软件裁剪实现比例")
+            } else {
+                print("【拍照流程】iOS版本过低，无法应用自定义裁剪区域")
+            }
+        }
         
         // 检查当前设备是否为虚拟设备
         let isVirtualDevice = false
@@ -940,7 +1007,7 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             }
             
             // 创建照片捕获处理器
-            let photoCaptureProcessor = PhotoCaptureProcessor { (data, error) in
+            let photoCaptureProcessor = PhotoCaptureProcessor(aspectRatio: self.currentAspectRatio) { (data, error) in
                 if let error = error {
                     print("【拍照流程】错误：拍照失败 - \(error.localizedDescription)")
                     DispatchQueue.main.async {
@@ -1546,14 +1613,16 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
 // MARK: - 照片捕获处理器
 class PhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelegate {
     private let completion: (Data?, Error?) -> Void
+    private let aspectRatio: String
     
     // 添加一个静态数组存储当前活跃的处理器实例，防止被过早释放
     private static var activeProcessors = [PhotoCaptureProcessor]()
     
-    init(completion: @escaping (Data?, Error?) -> Void) {
+    init(aspectRatio: String, completion: @escaping (Data?, Error?) -> Void) {
         self.completion = completion
+        self.aspectRatio = aspectRatio
         super.init()
-        print("【拍照流程】创建PhotoCaptureProcessor实例")
+        print("【拍照流程】创建PhotoCaptureProcessor实例，比例: \(aspectRatio)")
         
         // 将自己加入到活跃处理器列表
         PhotoCaptureProcessor.activeProcessors.append(self)
@@ -1569,7 +1638,40 @@ class PhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelegate {
             // 获取照片数据
             if let imageData = photo.fileDataRepresentation() {
                 print("【拍照流程】成功获取照片数据，大小: \(imageData.count) 字节")
-                completion(imageData, nil)
+                
+                // 检查是否需要裁剪 (非4:3比例)
+                if aspectRatio != "4:3" {
+                    // 创建UIImage以进行裁剪
+                    if let image = UIImage(data: imageData) {
+                        print("【拍照流程】照片尺寸: \(image.size.width) x \(image.size.height)，进行裁剪处理")
+                        
+                        // 根据不同比例计算裁剪区域
+                        let croppedImage: UIImage?
+                        switch aspectRatio {
+                        case "16:9":
+                            croppedImage = cropImageTo16by9(image)
+                        case "1:1":
+                            croppedImage = cropImageToSquare(image)
+                        default:
+                            croppedImage = image
+                        }
+                        
+                        // 转换裁剪后的图像为JPEG数据
+                        if let croppedImage = croppedImage, let croppedData = croppedImage.jpegData(compressionQuality: 0.9) {
+                            print("【拍照流程】裁剪后的照片尺寸: \(croppedImage.size.width) x \(croppedImage.size.height)，大小: \(croppedData.count) 字节")
+                            completion(croppedData, nil)
+                        } else {
+                            print("【拍照流程】裁剪照片后转换JPEG失败")
+                            completion(imageData, nil) // 降级：返回原始图像数据
+                        }
+                    } else {
+                        print("【拍照流程】无法从数据创建UIImage，返回原始数据")
+                        completion(imageData, nil)
+                    }
+                } else {
+                    // 不需要裁剪，直接返回原始数据
+                    completion(imageData, nil)
+                }
             } else {
                 print("【拍照流程】无法获取照片数据表示")
                 let error = NSError(domain: "com.haohaopai.app", code: 1006, userInfo: [NSLocalizedDescriptionKey: "无法获取照片数据"])
@@ -1582,6 +1684,82 @@ class PhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelegate {
             PhotoCaptureProcessor.activeProcessors.remove(at: index)
             print("【拍照流程】处理器已从活跃列表移除，当前活跃处理器数量: \(PhotoCaptureProcessor.activeProcessors.count)")
         }
+    }
+    
+    // 将图像裁剪为16:9比例 (竖屏下的9:16)
+    private func cropImageTo16by9(_ image: UIImage) -> UIImage? {
+        let sourceWidth = image.size.width
+        let sourceHeight = image.size.height
+        print("【9:16 裁剪】开始 - 原始尺寸: \(sourceWidth)x\(sourceHeight)") // 竖屏尺寸，例如 3024x4032
+
+        // 目标是 9:16 竖屏比例，保持高度不变，裁剪宽度
+        let targetWidth = sourceHeight * 9.0 / 16.0
+
+        // 确保目标宽度不超过原始宽度
+        guard targetWidth <= sourceWidth else {
+            print("【9:16 裁剪】错误：计算出的目标宽度(\(targetWidth))大于原始宽度(\(sourceWidth))")
+            return image // 避免裁剪错误，返回原图
+        }
+
+        let xOffset = (sourceWidth - targetWidth) / 2.0
+        // 确保 xOffset 不为负数
+        let finalXOffset = max(0, xOffset)
+
+        let cropRect = CGRect(x: finalXOffset, y: 0, width: targetWidth, height: sourceHeight)
+        print("【9:16 裁剪】目标宽度: \(targetWidth), X偏移: \(finalXOffset), 裁剪区域: \(cropRect)")
+
+        return cropImage(image, toRect: cropRect)
+    }
+
+    // 将图像裁剪为正方形 (1:1)
+    private func cropImageToSquare(_ image: UIImage) -> UIImage? {
+        let sourceWidth = image.size.width
+        let sourceHeight = image.size.height
+        print("【1:1 裁剪】开始 - 原始尺寸: \(sourceWidth)x\(sourceHeight)") // 竖屏尺寸，例如 3024x4032
+
+        // 目标是 1:1 正方形，保持宽度不变，裁剪高度
+        let targetHeight = sourceWidth // 正方形的边长等于原始宽度
+
+        // 确保目标高度不超过原始高度
+        guard targetHeight <= sourceHeight else {
+            print("【1:1 裁剪】错误：计算出的目标高度(\(targetHeight))大于原始高度(\(sourceHeight))")
+            return image // 避免裁剪错误，返回原图
+        }
+
+        let yOffset = (sourceHeight - targetHeight) / 2.0
+        // 确保 yOffset 不为负数
+        let finalYOffset = max(0, yOffset)
+
+        let cropRect = CGRect(x: 0, y: finalYOffset, width: sourceWidth, height: targetHeight)
+        print("【1:1 裁剪】目标高度: \(targetHeight), Y偏移: \(finalYOffset), 裁剪区域: \(cropRect)")
+
+        return cropImage(image, toRect: cropRect)
+    }
+    
+    // 通用的图像裁剪方法
+    private func cropImage(_ image: UIImage, toRect cropRect: CGRect) -> UIImage? {
+        guard let cgImage = image.cgImage else { return nil }
+        
+        let contextImage = UIImage(cgImage: cgImage)
+        
+        // 确保裁剪区域在图像范围内
+        let imageRect = CGRect(x: 0, y: 0, width: contextImage.size.width, height: contextImage.size.height)
+        let finalRect = cropRect.intersection(imageRect)
+        
+        // 计算裁剪区域（考虑UIImage的scale）
+        let scaledRect = CGRect(
+            x: finalRect.origin.x * image.scale,
+            y: finalRect.origin.y * image.scale,
+            width: finalRect.size.width * image.scale,
+            height: finalRect.size.height * image.scale
+        )
+        
+        // 裁剪图像
+        if let croppedCGImage = cgImage.cropping(to: scaledRect) {
+            return UIImage(cgImage: croppedCGImage, scale: image.scale, orientation: image.imageOrientation)
+        }
+        
+        return nil
     }
     
     // 添加一个方法用于在应用程序状态变化时清理

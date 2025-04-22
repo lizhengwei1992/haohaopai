@@ -660,6 +660,21 @@ class CameraStateManager extends ChangeNotifier {
     if (['4:3', '1:1', '16:9'].contains(ratio)) {
       _currentAspectRatio = ratio;
       notifyListeners();
+
+      // 调用原生方法设置拍摄比例
+      final cameraController =
+          NativeCameraService.instance.getGlobalCameraController();
+      if (cameraController != null) {
+        cameraController.setAspectRatio(ratio).then((success) {
+          if (success) {
+            debugPrint('原生setAspectRatio调用成功，设置比例: $ratio');
+          } else {
+            debugPrint('原生setAspectRatio调用失败');
+          }
+        }).catchError((e) {
+          debugPrint('设置拍摄比例时出错: $e');
+        });
+      }
     }
   }
 
@@ -679,6 +694,7 @@ class CameraStateManager extends ChangeNotifier {
     if (cameraController != null) {
       await cameraController.setFlashMode(_flashMode);
       await cameraController.setSystemLikeZoom(_currentZoomLevel);
+      await cameraController.setAspectRatio(_currentAspectRatio);
     }
 
     notifyListeners();

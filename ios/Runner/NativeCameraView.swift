@@ -310,6 +310,19 @@ class NativeCameraView: NSObject, FlutterPlatformView, FlutterStreamHandler {
                 result(FlutterError(code: "INVALID_ARGS", message: "无效的参数", details: nil))
             }
             
+        case "setAspectRatio":
+            if let args = call.arguments as? [String: Any], let ratio = args["ratio"] as? String {
+                CameraSingleton.shared.setAspectRatio(ratio) { success, error in
+                    if success {
+                        result(true)
+                    } else {
+                        result(FlutterError(code: "ASPECT_RATIO_FAILED", message: error ?? "设置比例失败", details: nil))
+                    }
+                }
+            } else {
+                result(FlutterError(code: "INVALID_ARGS", message: "无效的参数", details: nil))
+            }
+            
         case "isFrontCamera":
             // 这个方法需要在CameraSingleton中添加，返回当前是否为前置相机
             result(CameraSingleton.shared.isFrontCamera())

@@ -8,7 +8,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import '../layout/layout_params.dart';
 import 'album_screen.dart';
 
-/// 照片全屏查看页面
+/// 照片全屏查看页面 - iOS风格
 class PhotoViewScreen extends StatefulWidget {
   final String imagePath;
   final List<AssetEntity>? allPhotos;
@@ -29,8 +29,10 @@ class PhotoViewScreen extends StatefulWidget {
   State<PhotoViewScreen> createState() => _PhotoViewScreenState();
 }
 
-class _PhotoViewScreenState extends State<PhotoViewScreen> {
+class _PhotoViewScreenState extends State<PhotoViewScreen>
+    with SingleTickerProviderStateMixin {
   late PageController _pageController;
+  late ScrollController _thumbnailScrollController;
   late int _currentIndex;
   late List<AssetEntity> _photos;
   bool _isLoading = false;
@@ -41,18 +43,29 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
   // 预览参数
   late CameraLayoutParams _layoutParams;
 
+  // 缩略图尺寸 - 调整为瘦长形状且更小
+  final double _thumbnailHeight = 40.0;
+  final double _thumbnailDefaultWidth = 30.0;
+  final double _thumbnailSelectedWidth = 35.0;
+  final double _thumbnailSpacing = 3.0;
+
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex;
     _pageController = PageController(initialPage: _currentIndex);
+    _thumbnailScrollController = ScrollController();
 
     if (widget.allPhotos != null && widget.allPhotos!.isNotEmpty) {
       _photos = widget.allPhotos!;
-      // 预加载文件
+      // 预加载文件和缩略图
       _preloadFiles();
-      // 预缓存所有缩略图
       _preloadAllThumbnails();
+
+      // 确保初始显示时，缩略图位置正确
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollToCurrentThumbnail(animate: false);
+      });
     } else {
       _photos = [];
       _loadLatestPhoto();
@@ -158,30 +171,70 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
         // 获取相册中的所有照片
         final List<AssetEntity> photos =
             await albumEntity.getAssetListPaged(page: 0, size: 1000);
-        setState(() {
-          _photos = photos;
-          _isLoading = false;
-        });
-        // 预加载文件
-        _preloadFiles();
-        // 预缓存所有缩略图
-        _preloadAllThumbnails();
+        if (mounted) {
+          setState(() {
+            _photos = photos;
+            _isLoading = false;
+          });
+          // 预加载文件和缩略图
+          _preloadFiles();
+          _preloadAllThumbnails();
+
+          // 确保初始显示时，缩略图位置正确
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _scrollToCurrentThumbnail(animate: false);
+          });
+        }
       } else {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('加载相册照片失败: $e');
+      if (mounted) {
         setState(() {
           _isLoading = false;
         });
       }
-    } catch (e) {
-      debugPrint('加载相册照片失败: $e');
-      setState(() {
-        _isLoading = false;
-      });
+    }
+  }
+
+  // 滚动缩略图列表到当前选中的图片位置
+  void _scrollToCurrentThumbnail({bool animate = true}) {
+    if (_photos.isEmpty) return;
+
+    final screenWidth = MediaQuery.of(context).size.width;
+    final itemTotalWidth = _thumbnailDefaultWidth + _thumbnailSpacing * 2;
+
+    // 计算目标滚动位置，使当前图片居中
+    final targetPosition = _currentIndex * itemTotalWidth -
+        (screenWidth - _thumbnailSelectedWidth) / 2 +
+        _thumbnailSpacing;
+
+    // 确保不会滚动超出边界
+    final maxScrollExtent = _thumbnailScrollController.position.maxScrollExtent;
+    final scrollPosition = targetPosition.clamp(0.0, maxScrollExtent);
+
+    if (_thumbnailScrollController.hasClients) {
+      if (animate) {
+        _thumbnailScrollController.animateTo(
+          scrollPosition,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOutCubic,
+        );
+      } else {
+        _thumbnailScrollController.jumpTo(scrollPosition);
+      }
     }
   }
 
   @override
   void dispose() {
     _pageController.dispose();
+    _thumbnailScrollController.dispose();
     super.dispose();
   }
 
@@ -201,9 +254,10 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
       return _buildSinglePhotoView();
     }
 
-    // 计算中心位置
+    // 计算中心位置，使用layout_params中的预览框中心点
     final centerY = _layoutParams.previewCenterY;
-    final previewTopY = centerY - (_layoutParams.screenHeight * 0.9) / 2;
+    final previewHeight = _layoutParams.screenHeight * 0.9;
+    final previewTopY = centerY - previewHeight / 2;
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -225,16 +279,26 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
         },
         child: Stack(
           children: [
-            // 照片查看区域
+            // 主要照片区域 - 以相机预览框中心点为中心
             Positioned(
               top: previewTopY,
               left: 0,
               right: 0,
-              height: _layoutParams.screenHeight * 0.9,
-              child: PhotoViewGallery.builder(
-                scrollPhysics: const BouncingScrollPhysics(),
-                builder: (BuildContext context, int index) {
-                  return PhotoViewGalleryPageOptions.customChild(
+              height: previewHeight,
+              child: PageView.builder(
+                controller: _pageController,
+                itemCount: _photos.length,
+                onPageChanged: (index) {
+                  setState(() {
+                    _currentIndex = index;
+                  });
+                  // 滚动缩略图到当前位置
+                  _scrollToCurrentThumbnail();
+                  // 预加载文件
+                  _preloadFiles();
+                },
+                itemBuilder: (context, index) {
+                  return Center(
                     child: FutureBuilder<File?>(
                       future: _getFileAtIndex(index),
                       builder: (context, snapshot) {
@@ -248,6 +312,8 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
                             heroAttributes: PhotoViewHeroAttributes(
                               tag: 'photo_view_${_photos[index].id}',
                             ),
+                            backgroundDecoration:
+                                const BoxDecoration(color: Colors.black),
                           );
                         } else {
                           return Center(
@@ -258,56 +324,84 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
                         }
                       },
                     ),
-                    minScale: PhotoViewComputedScale.contained * 0.8,
-                    maxScale: PhotoViewComputedScale.covered * 2,
-                    initialScale: PhotoViewComputedScale.contained,
                   );
-                },
-                itemCount: _photos.length,
-                loadingBuilder: (context, event) => Center(
-                  child: SizedBox(
-                    width: 20.0,
-                    height: 20.0,
-                    child: CircularProgressIndicator(
-                      value: event == null
-                          ? 0
-                          : event.cumulativeBytesLoaded /
-                              (event.expectedTotalBytes ?? 1),
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-                backgroundDecoration: const BoxDecoration(color: Colors.black),
-                pageController: _pageController,
-                onPageChanged: (index) {
-                  setState(() {
-                    _currentIndex = index;
-                  });
-                  // 预加载前后的图片
-                  _preloadFiles();
                 },
               ),
             ),
 
-            // 缩略图预览区域（底部）
+            // 底部缩略图区域 - 向上移动50px
             Positioned(
-              bottom: 100, // 向上移动20px
+              bottom: 100, // 原来是50px，现在改为100px
               left: 0,
               right: 0,
               child: Container(
-                height: 60,
-                color: Colors.black.withOpacity(0.5),
-                child: _buildThumbnailRow(),
+                height: _thumbnailHeight + 10, // 高度包含上下内边距
+                color: Colors.black.withOpacity(0.3),
+                padding: const EdgeInsets.symmetric(vertical: 5),
+                child: ListView.builder(
+                  controller: _thumbnailScrollController,
+                  scrollDirection: Axis.horizontal,
+                  physics: const BouncingScrollPhysics(),
+                  itemCount: _photos.length,
+                  itemBuilder: (context, index) {
+                    // 计算视差效果 - 距离中心点越远，尺寸越小、透明度越低
+                    final distance = (index - _currentIndex).abs();
+                    final isSelected = index == _currentIndex;
+                    final scale = isSelected
+                        ? 1.0
+                        : (1.0 - distance * 0.15).clamp(0.7, 1.0);
+                    final opacity = isSelected
+                        ? 1.0
+                        : (1.0 - distance * 0.2).clamp(0.5, 1.0);
+
+                    return GestureDetector(
+                      onTap: () {
+                        _pageController.animateToPage(
+                          index,
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeOutCubic,
+                        );
+                      },
+                      child: Container(
+                        margin:
+                            EdgeInsets.symmetric(horizontal: _thumbnailSpacing),
+                        decoration: BoxDecoration(
+                          border: isSelected
+                              ? Border.all(
+                                  color: Colors.white.withOpacity(0.8),
+                                  width: 1)
+                              : null,
+                        ),
+                        child: Opacity(
+                          opacity: opacity,
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            curve: Curves.easeOutCubic,
+                            width: isSelected
+                                ? _thumbnailSelectedWidth
+                                : _thumbnailDefaultWidth * scale,
+                            height: isSelected
+                                ? _thumbnailHeight
+                                : _thumbnailHeight * scale,
+                            child: _buildThumbnailImage(index),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
               ),
             ),
 
-            // 底部操作按钮
+            // 底部操作按钮 - 向上移动10px
             Positioned(
-              bottom: 20,
+              bottom: 30, // 原来是20px，现在改为30px
               left: 0,
               right: 0,
-              child: Padding(
+              child: Container(
+                height: 50,
                 padding: const EdgeInsets.symmetric(horizontal: 30),
+                color: Colors.transparent,
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween, // 左右两端对齐
                   children: [
@@ -325,12 +419,12 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
                         }
                       },
                       child: Container(
-                        width: 40,
-                        height: 40,
+                        width: 30,
+                        height: 30,
                         child: SvgPicture.asset(
                           'assets/icons/info.svg',
-                          width: 20,
-                          height: 20,
+                          width: 15, // 缩小25%
+                          height: 15, // 缩小25%
                         ),
                       ),
                     ),
@@ -346,12 +440,12 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
                         }
                       },
                       child: Container(
-                        width: 40,
-                        height: 40,
+                        width: 30,
+                        height: 30,
                         child: SvgPicture.asset(
                           'assets/icons/delete.svg',
-                          width: 20,
-                          height: 20,
+                          width: 15, // 缩小25%
+                          height: 15, // 缩小25%
                         ),
                       ),
                     ),
@@ -360,74 +454,6 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  // 构建缩略图横向列表，当前选中的缩略图始终在中间
-  Widget _buildThumbnailRow() {
-    if (_photos.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    // 计算需要的偏移量，让当前图片总是在中间
-    final screenWidth = MediaQuery.of(context).size.width;
-    final itemWidth = 45.0; // 缩略图宽度
-    final selectedItemWidth = 55.0; // 选中的缩略图宽度
-    final spacing = 4.0; // 间距
-
-    // 计算列表视口中心位置
-    final centerX = screenWidth / 2;
-
-    // 计算滚动位置，使当前照片的缩略图在中间
-    final scrollOffset =
-        (_photos.length - 1 - _currentIndex) * (itemWidth + spacing) -
-            centerX +
-            selectedItemWidth / 2;
-
-    // 使用 IndexedStack 预加载所有缩略图组件
-    return Container(
-      height: 60,
-      child: NotificationListener<ScrollNotification>(
-        onNotification: (notification) => true, // 禁止自动滚动
-        child: ListView.builder(
-          controller: ScrollController(
-              initialScrollOffset: scrollOffset > 0 ? scrollOffset : 0),
-          scrollDirection: Axis.horizontal,
-          reverse: true, // 反向列表，最新的照片在最右边
-          itemCount: _photos.length,
-          physics: const ClampingScrollPhysics(), // 限制滚动范围
-          padding: const EdgeInsets.symmetric(horizontal: 15),
-          itemBuilder: (context, index) {
-            // 计算真实索引（因为反向列表）
-            final photoIndex = index;
-            final isSelected = photoIndex == _currentIndex;
-
-            return GestureDetector(
-              onTap: () {
-                _pageController.animateToPage(
-                  photoIndex,
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeInOut,
-                );
-              },
-              child: Container(
-                width: isSelected ? selectedItemWidth : itemWidth,
-                height: isSelected ? 55 : 45,
-                margin: EdgeInsets.symmetric(
-                  horizontal: spacing,
-                  vertical: isSelected ? 0 : 5,
-                ),
-                decoration: BoxDecoration(
-                  border: isSelected
-                      ? Border.all(color: const Color(0xFFA0A9FC), width: 2)
-                      : null,
-                ),
-                child: _buildThumbnailImage(photoIndex),
-              ),
-            );
-          },
         ),
       ),
     );
@@ -445,7 +471,7 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
       );
     }
 
-    // 如果没有缓存，则加载
+    // 如果没有缓存，则加载并显示加载指示器
     return FutureBuilder<Uint8List?>(
       future: _getThumbnailAtIndex(index),
       builder: (context, snapshot) {
@@ -458,14 +484,24 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
             cacheWidth: 200,
           );
         } else {
+          // 使用渐变色占位符，模仿iOS风格
           return Container(
-            color: Colors.grey[800],
-            child: const Center(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Colors.grey[800]!,
+                  Colors.grey[600]!,
+                ],
+              ),
+            ),
+            child: Center(
               child: SizedBox(
-                width: 15,
-                height: 15,
+                width: 10,
+                height: 10,
                 child: CircularProgressIndicator(
-                  strokeWidth: 2,
+                  strokeWidth: 1.5,
                   color: Colors.white70,
                 ),
               ),
@@ -478,12 +514,10 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
 
   // 构建单张照片视图
   Widget _buildSinglePhotoView() {
-    // 计算中心位置
-    final centerY = _layoutParams != null
-        ? _layoutParams.previewCenterY
-        : MediaQuery.of(context).size.height / 2;
-    final previewTopY =
-        centerY - (MediaQuery.of(context).size.height * 0.9) / 2;
+    // 计算中心位置，使用layout_params中的预览框中心点
+    final centerY = _layoutParams.previewCenterY;
+    final previewHeight = _layoutParams.screenHeight * 0.9;
+    final previewTopY = centerY - previewHeight / 2;
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -498,12 +532,12 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
       ),
       body: Stack(
         children: [
-          // 照片查看区域
+          // 照片查看区域 - 以相机预览框中心点为中心
           Positioned(
             top: previewTopY,
             left: 0,
             right: 0,
-            height: MediaQuery.of(context).size.height * 0.9,
+            height: previewHeight,
             child: PhotoView(
               imageProvider: FileImage(File(widget.imagePath)),
               minScale: PhotoViewComputedScale.contained * 0.8,
@@ -535,13 +569,15 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
             ),
           ),
 
-          // 底部操作按钮
+          // 底部操作按钮 - 向上移动10px
           Positioned(
-            bottom: 20,
+            bottom: 30, // 从20px改为30px
             left: 0,
             right: 0,
-            child: Padding(
+            child: Container(
+              height: 50,
               padding: const EdgeInsets.symmetric(horizontal: 30),
+              color: Colors.transparent,
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween, // 左右两端对齐
                 children: [
@@ -559,12 +595,12 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
                       }
                     },
                     child: Container(
-                      width: 40,
-                      height: 40,
+                      width: 30,
+                      height: 30,
                       child: SvgPicture.asset(
                         'assets/icons/info.svg',
-                        width: 24,
-                        height: 24,
+                        width: 15, // 缩小25%
+                        height: 15, // 缩小25%
                       ),
                     ),
                   ),
@@ -577,12 +613,12 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
                       }
                     },
                     child: Container(
-                      width: 40,
-                      height: 40,
+                      width: 30,
+                      height: 30,
                       child: SvgPicture.asset(
                         'assets/icons/delete.svg',
-                        width: 24,
-                        height: 24,
+                        width: 15, // 缩小25%
+                        height: 15, // 缩小25%
                       ),
                     ),
                   ),
@@ -665,6 +701,11 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
           // 重新预加载
           _preloadFiles();
           _preloadAllThumbnails();
+
+          // 滚动缩略图到当前位置
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _scrollToCurrentThumbnail(animate: false);
+          });
         } else {
           if (context.mounted) {
             ScaffoldMessenger.of(context).showSnackBar(

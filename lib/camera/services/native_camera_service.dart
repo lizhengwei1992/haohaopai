@@ -474,6 +474,20 @@ class NativeCameraController {
     }
   }
 
+  /// 设置拍摄比例
+  Future<bool> setAspectRatio(String ratio) async {
+    try {
+      final bool success = await _methodChannel.invokeMethod(
+        'setAspectRatio',
+        {'ratio': ratio},
+      );
+      return success;
+    } on PlatformException catch (e) {
+      debugPrint('设置拍摄比例时出错: ${e.message}');
+      return false;
+    }
+  }
+
   /// 释放资源
   void dispose() {
     _eventSubscription?.cancel();
