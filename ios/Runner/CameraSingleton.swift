@@ -1,6 +1,7 @@
 import AVFoundation
 import UIKit
 import Flutter
+import CoreMotion  // 添加CoreMotion框架
 
 class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     static let shared = CameraSingleton()
@@ -54,6 +55,10 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     // 私有变量
     private var wasRunningBeforeBackground = false
     
+    // 添加CoreMotion管理器
+    private let motionManager = CMMotionManager()
+    private var lastKnownDeviceOrientation: UIDeviceOrientation = .portrait
+    
     // 公共方法 - 检查相机是否已初始化
     var isCameraInitialized: Bool {
         return isInitialized
@@ -66,6 +71,110 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     private override init() {
         super.init()
         captureSession = AVCaptureSession()
+        
+        // 初始化设备方向检测
+        startDeviceOrientationTracking()
+    }
+    
+    deinit {
+        stopDeviceOrientationTracking()
+    }
+    
+    // 开始追踪设备方向
+    private func startDeviceOrientationTracking() {
+        if motionManager.isDeviceMotionAvailable {
+            motionManager.deviceMotionUpdateInterval = 0.2
+            motionManager.startDeviceMotionUpdates(to: .main) { [weak self] (motion, error) in
+                guard let self = self, let motion = motion else { return }
+                
+                let orientation = self.deviceOrientationFromMotion(motion)
+                if orientation != .unknown {
+                    self.lastKnownDeviceOrientation = orientation
+                }
+            }
+        } else {
+            // 回退到UIDevice方法
+            if !UIDevice.current.isGeneratingDeviceOrientationNotifications {
+                UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+            }
+            
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(deviceOrientationDidChange),
+                name: UIDevice.orientationDidChangeNotification,
+                object: nil
+            )
+        }
+    }
+    
+    // 停止追踪设备方向
+    private func stopDeviceOrientationTracking() {
+        if motionManager.isDeviceMotionActive {
+            motionManager.stopDeviceMotionUpdates()
+        }
+        
+        // 停止UIDevice通知
+        if UIDevice.current.isGeneratingDeviceOrientationNotifications {
+            UIDevice.current.endGeneratingDeviceOrientationNotifications()
+        }
+        NotificationCenter.default.removeObserver(self, name: UIDevice.orientationDidChangeNotification, object: nil)
+    }
+    
+    // 从CoreMotion数据计算设备方向
+    private func deviceOrientationFromMotion(_ motion: CMDeviceMotion) -> UIDeviceOrientation {
+        // 重力向量
+        let x = motion.gravity.x
+        let y = motion.gravity.y
+        let z = motion.gravity.z
+        
+        // 计算倾斜角度
+        let absoluteX = abs(x)
+        let absoluteY = abs(y)
+        
+        // 确定设备方向 - 修正竖向判断逻辑
+        if z < -0.75 {
+            return .faceUp
+        } else if z > 0.75 {
+            return .faceDown
+        } else if absoluteX < 0.5 && y < -0.5 {
+            // 注意：y轴重力向量为负值时表示设备正常竖直方向（Home键在下）
+            return .portrait
+        } else if absoluteX < 0.5 && y > 0.5 {
+            // 注意：y轴重力向量为正值时表示设备倒置（Home键在上）
+            return .portraitUpsideDown
+        } else if x > 0.5 && absoluteY < 0.5 {
+            return .landscapeRight
+        } else if x < -0.5 && absoluteY < 0.5 {
+            return .landscapeLeft
+        }
+        
+        // 返回最后已知方向，或默认为portrait
+        return lastKnownDeviceOrientation
+    }
+    
+    // 处理UIDevice方向变化通知
+    @objc private func deviceOrientationDidChange() {
+        let orientation = UIDevice.current.orientation
+        if orientation != .unknown && orientation != .faceUp && orientation != .faceDown {
+            lastKnownDeviceOrientation = orientation
+        }
+    }
+    
+    // 获取当前设备方向（结合CoreMotion和UIDevice）
+    func getCurrentDeviceOrientation() -> UIDeviceOrientation {
+        // 如果CoreMotion正在运行，使用lastKnownDeviceOrientation
+        if motionManager.isDeviceMotionActive {
+            return lastKnownDeviceOrientation
+        }
+        
+        // 否则尝试使用UIDevice
+        let orientation = UIDevice.current.orientation
+        if orientation != .unknown {
+            return orientation
+        }
+        
+        // 如果都不可用，返回最后已知方向或默认值
+        return lastKnownDeviceOrientation
     }
     
     // MARK: - 公共方法
@@ -882,14 +991,12 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     
     /// 拍照
     func capturePhoto(completion: @escaping (Data?, String?) -> Void) {
-        print("【拍照流程】1. 拍照方法开始执行")
+        print("【拍照流程】开始拍照")
         guard isInitialized, isRunning, let photoOutput = photoOutput else {
-            print("【拍照流程】错误：相机未初始化或未运行，isInitialized=\(isInitialized), isRunning=\(isRunning), photoOutput=\(photoOutput == nil ? "nil" : "有值")")
+            print("【拍照流程】错误：相机未初始化或未运行")
             completion(nil, "相机未初始化或未运行")
             return
         }
-        
-        print("【拍照流程】2. 相机状态检查通过")
         
         // 确保有可用的视频连接
         guard let videoConnection = photoOutput.connection(with: .video) else {
@@ -898,11 +1005,11 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             return
         }
         
-        print("【拍照流程】3. 获取视频连接成功")
+        // 获取当前设备方向并保存，用于照片处理 - 使用CoreMotion方法
+        let deviceOrientation = getCurrentDeviceOrientation()
         
         // 创建拍照设置
         let settings = AVCapturePhotoSettings()
-        print("【拍照流程】4. 创建拍照设置完成")
         
         // 应用当前设置的拍摄比例
         if currentAspectRatio != "4:3" {
@@ -923,7 +1030,6 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                     let targetHeight = sensorWidth * 9.0 / 16.0
                     let yOffset = (sensorHeight - targetHeight) / 2.0
                     cropRect = CGRect(x: 0, y: yOffset, width: sensorWidth, height: targetHeight)
-                    print("【拍照流程】设置16:9裁剪区域: \(cropRect!)")
                     
                 case "1:1":
                     // 以短边为准创建正方形区域
@@ -931,66 +1037,29 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                     let xOffset = (sensorWidth - minDimension) / 2.0
                     let yOffset = (sensorHeight - minDimension) / 2.0
                     cropRect = CGRect(x: xOffset, y: yOffset, width: minDimension, height: minDimension)
-                    print("【拍照流程】设置1:1裁剪区域: \(cropRect!)")
                     
                 default:
                     break // 使用默认的4:3
                 }
-                
-                // 存储裁剪区域，在处理照片数据时使用
-                // AVCapturePhotoSettings 没有 cropRect 属性，我们会在回调中处理裁剪
-                print("【拍照流程】注意：将在拍照完成后使用软件裁剪实现比例")
             } else {
                 print("【拍照流程】iOS版本过低，无法应用自定义裁剪区域")
             }
         }
         
-        // 检查当前设备是否为虚拟设备
-        let isVirtualDevice = false
-        if #available(iOS 13.0, *), let device = currentDevice {
-            print("【拍照流程】5. 当前设备类型: \(device.deviceType.rawValue)")
-            if device.deviceType == .builtInTripleCamera || 
-               device.deviceType == .builtInDualWideCamera || 
-               device.deviceType == .builtInDualCamera {
-                // 对于虚拟设备，使用高质量拍照设置
-                settings.isHighResolutionPhotoEnabled = true
-                print("【拍照流程】设置高分辨率拍照")
-                
-                // 如果当前缩放是超广角范围(0.5x)，确保正确捕获
-                if currentZoomFactor < 1.0 && hasUltraWideCamera {
-                    // 超广角模式下自动应用
-                    print("【拍照流程】在虚拟摄像头超广角模式下拍照")
-                } else if currentZoomFactor >= 2.5 && hasTelephotoCamera {
-                    // 长焦模式下自动应用
-                    print("【拍照流程】在虚拟摄像头长焦模式下拍照")
-                } else {
-                    // 广角模式下自动应用
-                    print("【拍照流程】在虚拟摄像头广角模式下拍照")
-                }
-            }
-        }
-        
-        print("【拍照流程】6. 检查闪光灯支持")
         // 检查是否支持闪光灯
         if let device = currentDevice, device.hasFlash && device.isFlashAvailable {
             if #available(iOS 10.0, *) {
                 // 检查闪光灯模式支持
                 if photoOutput.supportedFlashModes.contains(.auto) {
                     settings.flashMode = .auto
-                    print("【拍照流程】设置闪光灯为自动模式")
                 }
             } else {
                 settings.flashMode = .auto
-                print("【拍照流程】设置闪光灯为自动模式(旧版iOS)")
             }
         }
         
         // 设置高质量照片捕获
         settings.isHighResolutionPhotoEnabled = true
-        print("【拍照流程】7. 设置高分辨率拍照完成")
-        
-        // 创建照片捕获代理
-        print("【拍照流程】8. 创建照片捕获代理")
         
         // 为确保回调被正确触发，先添加到主队列延迟执行
         DispatchQueue.main.async { [weak self] in
@@ -1006,8 +1075,8 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                 return
             }
             
-            // 创建照片捕获处理器
-            let photoCaptureProcessor = PhotoCaptureProcessor(aspectRatio: self.currentAspectRatio) { (data, error) in
+            // 创建照片捕获处理器，传递当前设备方向
+            let photoCaptureProcessor = PhotoCaptureProcessor(aspectRatio: self.currentAspectRatio, deviceOrientation: deviceOrientation) { (data, error) in
                 if let error = error {
                     print("【拍照流程】错误：拍照失败 - \(error.localizedDescription)")
                     DispatchQueue.main.async {
@@ -1024,16 +1093,16 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                     return
                 }
                 
-                print("【拍照流程】12. 成功获取照片数据，大小: \(data.count) 字节")
+                print("【拍照流程】成功获取照片数据，大小: \(data.count) 字节")
+                
                 DispatchQueue.main.async {
                     completion(data, nil)
                 }
             }
             
             // 执行拍照
-            print("【拍照流程】9. 执行拍照操作")
             photoOutput.capturePhoto(with: settings, delegate: photoCaptureProcessor)
-            print("【拍照流程】10. 拍照操作已提交，等待回调...")
+            print("【拍照流程】拍照操作已提交，等待回调...")
         }
     }
     
@@ -1608,135 +1677,125 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         currentDevice = nil
         currentDeviceInput = nil
     }
-}
-
-// MARK: - 照片捕获处理器
-class PhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelegate {
-    private let completion: (Data?, Error?) -> Void
-    private let aspectRatio: String
     
-    // 添加一个静态数组存储当前活跃的处理器实例，防止被过早释放
-    private static var activeProcessors = [PhotoCaptureProcessor]()
-    
-    init(aspectRatio: String, completion: @escaping (Data?, Error?) -> Void) {
-        self.completion = completion
-        self.aspectRatio = aspectRatio
-        super.init()
-        print("【拍照流程】创建PhotoCaptureProcessor实例，比例: \(aspectRatio)")
+    // 修正图像方向，确保图像以正确方向保存
+    func fixImageOrientation(_ image: UIImage) -> UIImage {
+        print("【拍照流程】修正图像方向，原始方向: \(image.imageOrientation.rawValue)")
         
-        // 将自己加入到活跃处理器列表
-        PhotoCaptureProcessor.activeProcessors.append(self)
+        // 如果图像方向已经是正确的，则直接返回
+        if image.imageOrientation == .up {
+            print("【拍照流程】图像方向已是正确的，不需要修正")
+            return image
+        }
+        
+        // 获取图像尺寸
+        let width = image.size.width
+        let height = image.size.height
+        
+        // 创建一个新的图像上下文，确保使用正确的比例因子
+        UIGraphicsBeginImageContextWithOptions(CGSize(width: width, height: height), false, image.scale)
+        
+        // 在上下文中绘制图像，这会自动按照imageOrientation进行旋转
+        let rect = CGRect(x: 0, y: 0, width: width, height: height)
+        image.draw(in: rect)
+        
+        // 从上下文中获取新的图像
+        guard let normalizedImage = UIGraphicsGetImageFromCurrentImageContext() else {
+            print("【拍照流程】警告：无法从图像上下文获取修正后的图像")
+            return image
+        }
+        
+        // 结束图像上下文
+        UIGraphicsEndImageContext()
+        
+        print("【拍照流程】图像方向修正完成，新方向: \(normalizedImage.imageOrientation.rawValue), 尺寸: \(normalizedImage.size.width) x \(normalizedImage.size.height)")
+        
+        return normalizedImage
     }
     
-    func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
-        print("【拍照流程】11. didFinishProcessingPhoto回调被调用")
+    // 旋转图像
+    func rotateImage(_ image: UIImage, clockwise: Bool) -> UIImage {
+        let radians = clockwise ? CGFloat.pi / 2.0 : -CGFloat.pi / 2.0
+        let rotationDirection = clockwise ? "顺时针" : "逆时针"
+        print("【拍照流程】旋转图像: \(rotationDirection) 90度, 原始尺寸: \(image.size.width) x \(image.size.height)")
         
-        if let error = error {
-            print("【拍照流程】处理照片时出错: \(error.localizedDescription)")
-            completion(nil, error)
+        // 计算新的尺寸（宽高互换）
+        let sourceWidth = image.size.width
+        let sourceHeight = image.size.height
+        let newSize = CGSize(width: sourceHeight, height: sourceWidth)
+        
+        // 创建绘制上下文
+        UIGraphicsBeginImageContextWithOptions(newSize, false, image.scale)
+        let context = UIGraphicsGetCurrentContext()!
+        
+        // 平移和旋转
+        context.translateBy(x: newSize.width / 2, y: newSize.height / 2)
+        context.rotate(by: radians)
+        
+        // 绘制图像
+        context.scaleBy(x: 1.0, y: -1.0)
+        let rect = CGRect(x: -sourceWidth / 2, y: -sourceHeight / 2, width: sourceWidth, height: sourceHeight)
+        
+        if let cgImage = image.cgImage {
+            context.draw(cgImage, in: rect)
         } else {
-            // 获取照片数据
-            if let imageData = photo.fileDataRepresentation() {
-                print("【拍照流程】成功获取照片数据，大小: \(imageData.count) 字节")
-                
-                // 检查是否需要裁剪 (非4:3比例)
-                if aspectRatio != "4:3" {
-                    // 创建UIImage以进行裁剪
-                    if let image = UIImage(data: imageData) {
-                        print("【拍照流程】照片尺寸: \(image.size.width) x \(image.size.height)，进行裁剪处理")
-                        
-                        // 根据不同比例计算裁剪区域
-                        let croppedImage: UIImage?
-                        switch aspectRatio {
-                        case "16:9":
-                            croppedImage = cropImageTo16by9(image)
-                        case "1:1":
-                            croppedImage = cropImageToSquare(image)
-                        default:
-                            croppedImage = image
-                        }
-                        
-                        // 转换裁剪后的图像为JPEG数据
-                        if let croppedImage = croppedImage, let croppedData = croppedImage.jpegData(compressionQuality: 0.9) {
-                            print("【拍照流程】裁剪后的照片尺寸: \(croppedImage.size.width) x \(croppedImage.size.height)，大小: \(croppedData.count) 字节")
-                            completion(croppedData, nil)
-                        } else {
-                            print("【拍照流程】裁剪照片后转换JPEG失败")
-                            completion(imageData, nil) // 降级：返回原始图像数据
-                        }
-                    } else {
-                        print("【拍照流程】无法从数据创建UIImage，返回原始数据")
-                        completion(imageData, nil)
-                    }
-                } else {
-                    // 不需要裁剪，直接返回原始数据
-                    completion(imageData, nil)
-                }
-            } else {
-                print("【拍照流程】无法获取照片数据表示")
-                let error = NSError(domain: "com.haohaopai.app", code: 1006, userInfo: [NSLocalizedDescriptionKey: "无法获取照片数据"])
-                completion(nil, error)
-            }
+            print("【拍照流程】警告：无法获取图像的CGImage")
+            return image
         }
         
-        // 处理完成后从活跃处理器列表中移除自己
-        if let index = PhotoCaptureProcessor.activeProcessors.firstIndex(where: { $0 === self }) {
-            PhotoCaptureProcessor.activeProcessors.remove(at: index)
-            print("【拍照流程】处理器已从活跃列表移除，当前活跃处理器数量: \(PhotoCaptureProcessor.activeProcessors.count)")
+        // 获取旋转后的图像
+        guard let rotatedImage = UIGraphicsGetImageFromCurrentImageContext() else {
+            print("【拍照流程】警告：无法获取旋转后的图像")
+            return image
         }
+        UIGraphicsEndImageContext()
+        
+        print("【拍照流程】旋转后图像尺寸: \(rotatedImage.size.width) x \(rotatedImage.size.height), 方向: \(rotatedImage.imageOrientation.rawValue)")
+        
+        // 验证图像宽高是否确实互换
+        if rotatedImage.size.width != sourceHeight || rotatedImage.size.height != sourceWidth {
+            print("【拍照流程】警告：旋转后的尺寸与预期不符")
+        }
+        
+        return rotatedImage
     }
     
     // 将图像裁剪为16:9比例 (竖屏下的9:16)
-    private func cropImageTo16by9(_ image: UIImage) -> UIImage? {
-        // 获取图像的物理尺寸（考虑方向）
-        let isPortrait = isImagePortrait(image)
-        let physicalSize = getPhysicalSize(image)
-        let sourceWidth = physicalSize.width
-        let sourceHeight = physicalSize.height
+    func cropImageTo16by9(_ image: UIImage) -> UIImage? {
+        let sourceWidth = image.size.width
+        let sourceHeight = image.size.height
         
-        print("【16:9 裁剪】开始 - 原始尺寸: \(sourceWidth)x\(sourceHeight), 方向: \(isPortrait ? "竖向" : "横向")")
+        // 判断图像是否为横向
+        let isLandscape = sourceWidth > sourceHeight
         
-        // 确定长边和短边
-        let longSide = max(sourceWidth, sourceHeight)
-        let shortSide = min(sourceWidth, sourceHeight)
-        
-        // 计算16:9比例下的新尺寸
-        // 保持长边不变，计算短边应该的长度
-        let targetShortSide = longSide * 9.0 / 16.0
-        
-        var cropRect: CGRect
-        
-        if isPortrait {
-            // 竖向图片：高度是长边，宽度是短边
-            // 裁剪左右，保持高度不变
-            let targetWidth = sourceHeight * 9.0 / 16.0
-            let xOffset = (sourceWidth - targetWidth) / 2.0
-            cropRect = CGRect(x: xOffset, y: 0, width: targetWidth, height: sourceHeight)
-            print("【16:9 裁剪】竖向模式 - 裁剪左右，保持高度\(sourceHeight)不变，目标宽度: \(targetWidth)")
-        } else {
-            // 横向图片：宽度是长边，高度是短边
-            // 裁剪上下，保持宽度不变
+        // 无论横向还是竖向，都保持最长边不变，裁剪短边
+        if isLandscape {
+            // 横向图像：保持宽度不变，裁剪高度
             let targetHeight = sourceWidth * 9.0 / 16.0
+            
+            // 高度裁剪量计算
             let yOffset = (sourceHeight - targetHeight) / 2.0
-            cropRect = CGRect(x: 0, y: yOffset, width: sourceWidth, height: targetHeight)
-            print("【16:9 裁剪】横向模式 - 裁剪上下，保持宽度\(sourceWidth)不变，目标高度: \(targetHeight)")
+            let finalYOffset = max(0, yOffset)
+            
+            let cropRect = CGRect(x: 0, y: finalYOffset, width: sourceWidth, height: targetHeight)
+            return cropImage(image, toRect: cropRect)
+        } else {
+            // 竖向图像：保持高度不变，裁剪宽度
+            let targetWidth = sourceHeight * 9.0 / 16.0
+            
+            // 宽度裁剪量计算
+            let xOffset = (sourceWidth - targetWidth) / 2.0
+            let finalXOffset = max(0, xOffset)
+            
+            let cropRect = CGRect(x: finalXOffset, y: 0, width: targetWidth, height: sourceHeight)
+            return cropImage(image, toRect: cropRect)
         }
-        
-        print("【16:9 裁剪】裁剪区域: \(cropRect)")
-        
-        // 执行裁剪，保持原始方向
-        return cropImage(image, toRect: cropRect)
     }
 
     // 将图像裁剪为正方形 (1:1)
-    private func cropImageToSquare(_ image: UIImage) -> UIImage? {
-        // 获取图像的物理尺寸（考虑方向）
-        let isPortrait = isImagePortrait(image)
-        let physicalSize = getPhysicalSize(image)
-        let sourceWidth = physicalSize.width
-        let sourceHeight = physicalSize.height
-        
-        print("【1:1 裁剪】开始 - 原始尺寸: \(sourceWidth)x\(sourceHeight), 方向: \(isPortrait ? "竖向" : "横向")")
+    func cropImageToSquare(_ image: UIImage) -> UIImage? {
+        let sourceWidth = image.size.width
+        let sourceHeight = image.size.height
         
         // 使用较短边作为正方形边长
         let squareSize = min(sourceWidth, sourceHeight)
@@ -1746,60 +1805,304 @@ class PhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelegate {
         let yOffset = (sourceHeight - squareSize) / 2.0
         
         let cropRect = CGRect(x: xOffset, y: yOffset, width: squareSize, height: squareSize)
-        print("【1:1 裁剪】正方形边长: \(squareSize), 偏移: (\(xOffset), \(yOffset)), 裁剪区域: \(cropRect)")
-        
-        // 执行裁剪，保持原始方向
         return cropImage(image, toRect: cropRect)
     }
     
     // 通用的图像裁剪方法
-    private func cropImage(_ image: UIImage, toRect cropRect: CGRect) -> UIImage? {
+    func cropImage(_ image: UIImage, toRect cropRect: CGRect) -> UIImage? {
         guard let cgImage = image.cgImage else { return nil }
         
-        // 考虑图像的方向
-        let orientation = image.imageOrientation
+        let contextImage = UIImage(cgImage: cgImage)
+        
+        // 确保裁剪区域在图像范围内
+        let imageRect = CGRect(x: 0, y: 0, width: contextImage.size.width, height: contextImage.size.height)
+        let finalRect = cropRect.intersection(imageRect)
         
         // 计算裁剪区域（考虑UIImage的scale）
         let scaledRect = CGRect(
-            x: cropRect.origin.x * image.scale,
-            y: cropRect.origin.y * image.scale,
-            width: cropRect.size.width * image.scale,
-            height: cropRect.size.height * image.scale
+            x: finalRect.origin.x * image.scale,
+            y: finalRect.origin.y * image.scale,
+            width: finalRect.size.width * image.scale,
+            height: finalRect.size.height * image.scale
         )
         
         // 裁剪图像
         if let croppedCGImage = cgImage.cropping(to: scaledRect) {
-            // 创建新图像时保持原始方向
-            return UIImage(cgImage: croppedCGImage, scale: image.scale, orientation: orientation)
+            return UIImage(cgImage: croppedCGImage, scale: image.scale, orientation: image.imageOrientation)
         }
         
         return nil
     }
     
-    // 检查图像是否为竖向
-    private func isImagePortrait(_ image: UIImage) -> Bool {
-        // 考虑图像方向
-        switch image.imageOrientation {
-        case .left, .right, .leftMirrored, .rightMirrored:
-            // 这些方向下，宽高是交换的
-            return image.size.width > image.size.height
-        default:
-            // 正常情况下，高>宽为竖向
-            return image.size.height > image.size.width
+    // 强制重绘旋转后的图像，确保像素数据真正被改变
+    func forceRedrawRotatedImage(_ image: UIImage) -> UIImage {
+        print("【拍照流程】强制重绘横向图像为竖向")
+        
+        // 强制旋转为竖向图像，宽高互换
+        let sourceWidth = image.size.width
+        let sourceHeight = image.size.height
+        let targetSize = CGSize(width: sourceHeight, height: sourceWidth)
+        
+        // 创建旋转变换
+        let rotationAngle = CGFloat.pi / 2  // 90度，顺时针旋转
+        
+        // 创建绘制上下文
+        UIGraphicsBeginImageContextWithOptions(targetSize, false, image.scale)
+        let context = UIGraphicsGetCurrentContext()!
+        
+        // 移动原点到中心
+        context.translateBy(x: targetSize.width / 2, y: targetSize.height / 2)
+        // 应用旋转
+        context.rotate(by: rotationAngle)
+        // 翻转坐标空间，因为Core Graphics和UIKit的坐标系不同
+        context.scaleBy(x: 1.0, y: -1.0)
+        
+        // 绘制图像
+        let drawRect = CGRect(x: -sourceWidth / 2, y: -sourceHeight / 2, width: sourceWidth, height: sourceHeight)
+        context.draw(image.cgImage!, in: drawRect)
+        
+        // 获取新图像
+        let rotatedImage = UIGraphicsGetImageFromCurrentImageContext()!
+        UIGraphicsEndImageContext()
+        
+        print("【拍照流程】强制重绘后图像尺寸: \(rotatedImage.size.width) x \(rotatedImage.size.height)")
+        
+        return rotatedImage
+    }
+}
+
+// MARK: - 照片捕获处理器
+class PhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelegate {
+    private let completion: (Data?, Error?) -> Void
+    private let aspectRatio: String
+    private let deviceOrientation: UIDeviceOrientation
+    
+    // 添加一个静态数组存储当前活跃的处理器实例，防止被过早释放
+    private static var activeProcessors = [PhotoCaptureProcessor]()
+    
+    init(aspectRatio: String, deviceOrientation: UIDeviceOrientation, completion: @escaping (Data?, Error?) -> Void) {
+        self.completion = completion
+        self.aspectRatio = aspectRatio
+        self.deviceOrientation = deviceOrientation
+        super.init()
+        
+        // 将自己加入到活跃处理器列表
+        PhotoCaptureProcessor.activeProcessors.append(self)
+    }
+    
+    func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+        print("【拍照流程】照片处理中...")
+        
+        if let error = error {
+            print("【拍照流程】处理照片时出错: \(error.localizedDescription)")
+            completion(nil, error)
+        } else {
+            // 获取照片数据
+            if let imageData = photo.fileDataRepresentation() {
+                // 处理图像方向
+                let processedData = processImageData(imageData, deviceOrientation: deviceOrientation)
+                
+                // 检查是否需要裁剪 (非4:3比例)
+                if aspectRatio != "4:3" {
+                    print("【拍照流程】裁剪照片为 \(aspectRatio) 比例")
+                    
+                    // 创建UIImage以进行裁剪
+                    if let image = UIImage(data: processedData) {
+                        // 根据不同比例计算裁剪区域
+                        let croppedImage: UIImage?
+                        switch aspectRatio {
+                        case "16:9":
+                            croppedImage = CameraSingleton.shared.cropImageTo16by9(image)
+                        case "1:1":
+                            croppedImage = CameraSingleton.shared.cropImageToSquare(image)
+                        default:
+                            croppedImage = image
+                        }
+                        
+                        // 转换裁剪后的图像为JPEG数据，保留EXIF
+                        if let croppedImage = croppedImage, 
+                           let croppedData = addOrientationToImageData(croppedImage.jpegData(compressionQuality: 0.9), deviceOrientation: deviceOrientation) {
+                            completion(croppedData, nil)
+                        } else {
+                            print("【拍照流程】裁剪照片后转换失败，使用原始图像")
+                            completion(processedData, nil)
+                        }
+                    } else {
+                        print("【拍照流程】无法从数据创建图像，使用原始数据")
+                        completion(processedData, nil)
+                    }
+                } else {
+                    // 不需要裁剪，直接返回处理后的图像数据
+                    completion(processedData, nil)
+                }
+            } else {
+                print("【拍照流程】无法获取照片数据")
+                let error = NSError(domain: "com.haohaopai.app", code: 1006, userInfo: [NSLocalizedDescriptionKey: "无法获取照片数据"])
+                completion(nil, error)
+            }
+        }
+        
+        // 处理完成后从活跃处理器列表中移除自己
+        if let index = PhotoCaptureProcessor.activeProcessors.firstIndex(where: { $0 === self }) {
+            PhotoCaptureProcessor.activeProcessors.remove(at: index)
         }
     }
     
-    // 获取考虑方向后的物理尺寸
-    private func getPhysicalSize(_ image: UIImage) -> CGSize {
-        let size = image.size
+    // 处理图像数据，根据设备方向设置正确的EXIF方向标签
+    private func processImageData(_ imageData: Data, deviceOrientation: UIDeviceOrientation) -> Data {
+        // 创建图像源
+        guard let source = CGImageSourceCreateWithData(imageData as CFData, nil) else {
+            return imageData
+        }
         
-        // 考虑图像方向
-        switch image.imageOrientation {
-        case .left, .right, .leftMirrored, .rightMirrored:
-            // 这些方向下，宽高是交换的
-            return CGSize(width: size.height, height: size.width)
-        default:
-            return size
+        // 获取原始图像属性
+        let imageProperties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any] ?? [:]
+        
+        // 创建一个可变的图像属性字典
+        var newProperties = imageProperties
+        
+        // 确定正确的EXIF方向值
+        var orientationValue: CGImagePropertyOrientation
+        
+        // 检查是否为前置相机
+        let isFrontCamera = CameraSingleton.shared.isFrontCamera()
+        
+        if isFrontCamera {
+            // 前置相机拍摄的照片需要水平翻转
+            switch deviceOrientation {
+            case .landscapeLeft:
+                // 对于前置相机，需要与后置相机相反
+                orientationValue = .downMirrored  // 值为4，旋转180度并水平翻转
+            case .landscapeRight:
+                // 对于前置相机，需要与后置相机相反
+                orientationValue = .upMirrored  // 值为2，水平翻转
+            case .portrait:
+                orientationValue = .leftMirrored  // 值为5，顺时针旋转90度并水平翻转
+            case .portraitUpsideDown:
+                orientationValue = .rightMirrored  // 值为7，逆时针旋转90度并水平翻转
+            case .faceUp, .faceDown:
+                orientationValue = .leftMirrored  // 值为5
+            default:
+                orientationValue = .leftMirrored  // 值为5
+            }
+        } else {
+            // 后置相机
+            switch deviceOrientation {
+            case .landscapeLeft:
+                orientationValue = .up  // 值为1
+            case .landscapeRight:
+                orientationValue = .down  // 值为3
+            case .portrait:
+                orientationValue = .right  // 值为6
+            case .portraitUpsideDown:
+                orientationValue = .left  // 值为8
+            case .faceUp, .faceDown:
+                orientationValue = .right  // 值为6
+            default:
+                orientationValue = .right  // 值为6
+            }
+        }
+        
+        // 设置方向属性
+        newProperties[kCGImagePropertyOrientation as String] = orientationValue.rawValue
+        
+        // 创建一个可变数据对象来存储新的图像数据
+        let mutableData = NSMutableData()
+        
+        // 创建图像目标
+        guard let destination = CGImageDestinationCreateWithData(mutableData, CGImageSourceGetType(source)!, 1, nil) else {
+            return imageData
+        }
+        
+        // 添加图像到目标，并应用新属性
+        CGImageDestinationAddImageFromSource(destination, source, 0, newProperties as CFDictionary)
+        
+        // 完成图像目标的写入
+        if CGImageDestinationFinalize(destination) {
+            return mutableData as Data
+        } else {
+            return imageData
+        }
+    }
+    
+    // 为图像数据添加方向信息
+    private func addOrientationToImageData(_ imageData: Data?, deviceOrientation: UIDeviceOrientation) -> Data? {
+        guard let imageData = imageData else {
+            return nil
+        }
+        
+        // 创建图像源
+        guard let source = CGImageSourceCreateWithData(imageData as CFData, nil) else {
+            return imageData
+        }
+        
+        // 确定正确的EXIF方向值
+        var orientationValue: CGImagePropertyOrientation
+        
+        // 检查是否为前置相机
+        let isFrontCamera = CameraSingleton.shared.isFrontCamera()
+        
+        if isFrontCamera {
+            // 前置相机拍摄的照片需要水平翻转
+            switch deviceOrientation {
+            case .landscapeLeft:
+                // 对于前置相机，需要与后置相机相反
+                orientationValue = .downMirrored  // 值为4，旋转180度并水平翻转
+            case .landscapeRight:
+                // 对于前置相机，需要与后置相机相反
+                orientationValue = .upMirrored  // 值为2，水平翻转
+            case .portrait:
+                orientationValue = .leftMirrored  // 值为5，顺时针旋转90度并水平翻转
+            case .portraitUpsideDown:
+                orientationValue = .rightMirrored  // 值为7，逆时针旋转90度并水平翻转
+            case .faceUp, .faceDown:
+                orientationValue = .leftMirrored  // 值为5
+            default:
+                orientationValue = .leftMirrored  // 值为5
+            }
+        } else {
+            // 后置相机
+            switch deviceOrientation {
+            case .landscapeLeft:
+                orientationValue = .up  // 值为1
+            case .landscapeRight:
+                orientationValue = .down  // 值为3
+            case .portrait:
+                orientationValue = .right  // 值为6
+            case .portraitUpsideDown:
+                orientationValue = .left  // 值为8
+            case .faceUp, .faceDown:
+                orientationValue = .right  // 值为6
+            default:
+                orientationValue = .right  // 值为6
+            }
+        }
+        
+        // 创建一个可变数据对象来存储新的图像数据
+        let mutableData = NSMutableData()
+        
+        // 创建图像目标
+        guard let destination = CGImageDestinationCreateWithData(mutableData, CGImageSourceGetType(source)!, 1, nil) else {
+            return imageData
+        }
+        
+        // 获取原始图像属性
+        let imageProperties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any] ?? [:]
+        
+        // 创建一个可变的图像属性字典
+        var newProperties = imageProperties
+        
+        // 设置方向属性
+        newProperties[kCGImagePropertyOrientation as String] = orientationValue.rawValue
+        
+        // 添加图像到目标，并应用新属性
+        CGImageDestinationAddImageFromSource(destination, source, 0, newProperties as CFDictionary)
+        
+        // 完成图像目标的写入
+        if CGImageDestinationFinalize(destination) {
+            return mutableData as Data
+        } else {
+            return imageData
         }
     }
     
@@ -1807,6 +2110,5 @@ class PhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelegate {
     class func cleanupActiveProcessors() {
         let count = activeProcessors.count
         activeProcessors.removeAll()
-        print("【拍照流程】清理了 \(count) 个活跃的照片处理器")
     }
 } 
