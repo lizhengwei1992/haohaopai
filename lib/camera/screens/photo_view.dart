@@ -633,93 +633,73 @@ class _PhotoViewScreenState extends State<PhotoViewScreen>
 
   // 删除当前照片并切换到上一张
   Future<void> _deleteCurrentPhoto() async {
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('删除照片'),
-        content: const Text('确定要删除这张照片吗？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('删除', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
+    try {
+      int previousIndex = _currentIndex;
+      final photo = _photos[_currentIndex];
 
-    if (result == true) {
-      try {
-        int previousIndex = _currentIndex;
-        final photo = _photos[_currentIndex];
+      // 先移动到前一张照片（如果当前是第一张，则移动到下一张）
+      if (_currentIndex > 0) {
+        previousIndex = _currentIndex - 1;
+      } else if (_photos.length > 1) {
+        previousIndex = 0; // 仍然是第一张，但会删除当前的第一张
+      }
 
-        // 先移动到前一张照片（如果当前是第一张，则移动到下一张）
-        if (_currentIndex > 0) {
-          previousIndex = _currentIndex - 1;
-        } else if (_photos.length > 1) {
-          previousIndex = 0; // 仍然是第一张，但会删除当前的第一张
-        }
+      // 如果不是查看第一张，则先切换到前一张
+      if (_currentIndex > 0) {
+        _pageController.animateToPage(
+          previousIndex,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+        );
+        await Future.delayed(const Duration(milliseconds: 210));
+      }
 
-        // 如果不是查看第一张，则先切换到前一张
-        if (_currentIndex > 0) {
-          _pageController.animateToPage(
-            previousIndex,
-            duration: const Duration(milliseconds: 200),
-            curve: Curves.easeInOut,
-          );
-          await Future.delayed(const Duration(milliseconds: 210));
-        }
+      // 执行删除
+      final result = await PhotoManager.editor.deleteWithIds([photo.id]);
 
-        // 执行删除
-        final result = await PhotoManager.editor.deleteWithIds([photo.id]);
+      if (result.isNotEmpty) {
+        // 刷新照片列表
+        setState(() {
+          _photos.removeAt(_currentIndex);
 
-        if (result.isNotEmpty) {
-          // 刷新照片列表
-          setState(() {
-            _photos.removeAt(_currentIndex);
-
-            // 如果删除的是第一张且有多张照片，保持当前索引为0
-            // 如果删除的是其他照片，当前索引需要更新为前一张的索引
-            if (_currentIndex > 0) {
-              _currentIndex = previousIndex;
-            }
-
-            // 如果删除后没有照片了，返回
-            if (_photos.isEmpty && context.mounted) {
-              Navigator.pop(context);
-              return;
-            }
-          });
-
-          // 清除缓存
-          _fileCache.clear();
-          _thumbnailCache.clear();
-
-          // 重新预加载
-          _preloadFiles();
-          _preloadAllThumbnails();
-
-          // 滚动缩略图到当前位置
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            _scrollToCurrentThumbnail(animate: false);
-          });
-        } else {
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('删除照片失败')),
-            );
+          // 如果删除的是第一张且有多张照片，保持当前索引为0
+          // 如果删除的是其他照片，当前索引需要更新为前一张的索引
+          if (_currentIndex > 0) {
+            _currentIndex = previousIndex;
           }
-        }
-      } catch (e) {
-        debugPrint('删除照片失败: $e');
+
+          // 如果删除后没有照片了，返回
+          if (_photos.isEmpty && context.mounted) {
+            Navigator.pop(context);
+            return;
+          }
+        });
+
+        // 清除缓存
+        _fileCache.clear();
+        _thumbnailCache.clear();
+
+        // 重新预加载
+        _preloadFiles();
+        _preloadAllThumbnails();
+
+        // 滚动缩略图到当前位置
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _scrollToCurrentThumbnail(animate: false);
+        });
+      } else {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('删除照片失败: $e')),
+            const SnackBar(content: Text('删除照片失败')),
           );
         }
+      }
+    } catch (e) {
+      debugPrint('删除照片失败: $e');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('删除照片失败: $e')),
+        );
       }
     }
   }
@@ -743,25 +723,8 @@ class _PhotoViewScreenState extends State<PhotoViewScreen>
 
   // 确认删除对话框（单图模式）
   Future<void> _confirmDelete(BuildContext context) async {
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('删除照片'),
-        content: const Text('确定要删除这张照片吗？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('删除', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-
-    if (result == true && widget.onDelete != null) {
+    // 直接调用删除功能，不再显示确认对话框
+    if (widget.onDelete != null) {
       widget.onDelete!();
       if (context.mounted) {
         Navigator.pop(context); // 关闭照片查看页面

@@ -1969,20 +1969,20 @@ class PhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelegate {
         
         if isFrontCamera {
             // 前置相机拍摄的照片需要水平翻转
-            switch deviceOrientation {
-            case .landscapeLeft:
+        switch deviceOrientation {
+        case .landscapeLeft:
                 // 对于前置相机，需要与后置相机相反
                 orientationValue = .downMirrored  // 值为4，旋转180度并水平翻转
-            case .landscapeRight:
+        case .landscapeRight:
                 // 对于前置相机，需要与后置相机相反
                 orientationValue = .upMirrored  // 值为2，水平翻转
-            case .portrait:
+        case .portrait:
                 orientationValue = .leftMirrored  // 值为5，顺时针旋转90度并水平翻转
-            case .portraitUpsideDown:
+        case .portraitUpsideDown:
                 orientationValue = .rightMirrored  // 值为7，逆时针旋转90度并水平翻转
-            case .faceUp, .faceDown:
+        case .faceUp, .faceDown:
                 orientationValue = .leftMirrored  // 值为5
-            default:
+        default:
                 orientationValue = .leftMirrored  // 值为5
             }
         } else {
@@ -2044,20 +2044,20 @@ class PhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelegate {
         
         if isFrontCamera {
             // 前置相机拍摄的照片需要水平翻转
-            switch deviceOrientation {
-            case .landscapeLeft:
+        switch deviceOrientation {
+        case .landscapeLeft:
                 // 对于前置相机，需要与后置相机相反
                 orientationValue = .downMirrored  // 值为4，旋转180度并水平翻转
-            case .landscapeRight:
+        case .landscapeRight:
                 // 对于前置相机，需要与后置相机相反
                 orientationValue = .upMirrored  // 值为2，水平翻转
-            case .portrait:
+        case .portrait:
                 orientationValue = .leftMirrored  // 值为5，顺时针旋转90度并水平翻转
-            case .portraitUpsideDown:
+        case .portraitUpsideDown:
                 orientationValue = .rightMirrored  // 值为7，逆时针旋转90度并水平翻转
-            case .faceUp, .faceDown:
+        case .faceUp, .faceDown:
                 orientationValue = .leftMirrored  // 值为5
-            default:
+        default:
                 orientationValue = .leftMirrored  // 值为5
             }
         } else {

@@ -1,13 +1,19 @@
+import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../utils/settings_provider.dart';
+import '../utils/profile_provider.dart';
 import '../login/auth_provider.dart';
 import 'settings_screen.dart';
 import '../camera/screens/camera_screen.dart';
 import '../camera/services/camera_service.dart';
+import '../camera/services/album_service.dart';
+import '../camera/screens/album_screen.dart';
+import '../camera/screens/photo_view.dart';
+import 'package:photo_manager/photo_manager.dart';
 import 'messages_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -17,23 +23,45 @@ class ProfileScreen extends StatefulWidget {
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
-class _ProfileScreenState extends State<ProfileScreen> {
+class _ProfileScreenState extends State<ProfileScreen>
+    with WidgetsBindingObserver {
   String nickname = "昵称";
-  String? avatarPath;
-  String? backgroundImagePath;
+  // 移除本地状态变量，使用ProfileProvider
+  final GlobalKey _albumKey = GlobalKey();
 
   @override
   void initState() {
     super.initState();
     // 在初始化时加载用户信息
     _loadUserInfo();
+
+    // 添加应用生命周期观察者
+    WidgetsBinding.instance.addObserver(this);
   }
 
   @override
+  void dispose() {
+    // 移除观察者
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 当应用恢复到前台时刷新相册
+    if (state == AppLifecycleState.resumed) {
+      _refreshAlbum();
+    }
+  }
+
+  // 页面获取焦点时刷新相册
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // 当依赖变化时（如Provider状态更新）重新加载信息
-    _loadUserInfo();
+    // 检查是否是从其他页面返回
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _refreshAlbum();
+    });
   }
 
   void _loadUserInfo() {
@@ -49,43 +77,45 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF010417),
-      body: Stack(
-        children: [
-          Column(
-            children: [
-              _buildHeaderSection(),
-              const SizedBox(height: 10), // 添加间距，使分隔线下移
-              Container(
-                height: 2, // 加粗一倍
-                margin: const EdgeInsets.symmetric(horizontal: 20.0),
-                color: Colors.white.withOpacity(0.3),
-              ),
-              _buildAlbumLabel(),
-              Expanded(
-                child: Center(
-                  child: Text(
-                    "相册功能(TODO)",
-                    style: TextStyle(color: Colors.white.withOpacity(0.7)),
-                  ),
-                ),
-              ),
-            ],
-          ),
+    // 使用Consumer获取ProfileProvider中的头像和背景图片路径
+    return Consumer<ProfileProvider>(
+        builder: (context, profileProvider, child) {
+      final avatarPath = profileProvider.avatarPath;
+      final backgroundImagePath = profileProvider.backgroundImagePath;
 
-          // 底部中央悬浮相机按钮
-          Positioned(
-            bottom: 50, // 将bottom值从30增加到50，使按钮向上移动
-            left: 0,
-            right: 0,
-            child: Center(
-              child: _buildCameraButton(),
+      return Scaffold(
+        backgroundColor: const Color(0xFF010417),
+        body: Stack(
+          children: [
+            Column(
+              children: [
+                _buildHeaderSection(avatarPath, backgroundImagePath),
+                const SizedBox(height: 10), // 添加间距，使分隔线下移
+                Container(
+                  height: 2, // 加粗一倍
+                  margin: const EdgeInsets.symmetric(horizontal: 20.0),
+                  color: Colors.white.withOpacity(0.3),
+                ),
+                _buildAlbumLabel(),
+                Expanded(
+                  child: _buildAlbumContent(), // 使用新的相册内容组件
+                ),
+              ],
             ),
-          ),
-        ],
-      ),
-    );
+
+            // 底部中央悬浮相机按钮
+            Positioned(
+              bottom: 50, // 将bottom值从30增加到50，使按钮向上移动
+              left: 0,
+              right: 0,
+              child: Center(
+                child: _buildCameraButton(),
+              ),
+            ),
+          ],
+        ),
+      );
+    });
   }
 
   // 构建相机按钮
@@ -136,7 +166,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
             MaterialPageRoute(
               builder: (context) => const CameraScreen(),
             ),
-          );
+          ).then((_) {
+            // 从相机页面返回时刷新相册
+            _refreshAlbum();
+          });
         }
       },
       child: Container(
@@ -194,7 +227,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildHeaderSection() {
+  Widget _buildHeaderSection(String? avatarPath, String? backgroundImagePath) {
     final screenHeight = MediaQuery.of(context).size.height;
     final avatarPosition = screenHeight * 0.10; // 进一步降低比例，头像位置更上移
     final statsCardPosition = avatarPosition + 120; // 增加间距，避免重叠
@@ -215,7 +248,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               onTap: _pickBackgroundImage,
               child: backgroundImagePath != null
                   ? Image.file(
-                      File(backgroundImagePath!),
+                      File(backgroundImagePath),
                       fit: BoxFit.cover,
                       alignment: Alignment.topCenter, // 使背景图片从顶部开始显示
                     )
@@ -325,7 +358,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                       image: avatarPath != null
                           ? DecorationImage(
-                              image: FileImage(File(avatarPath!)),
+                              image: FileImage(File(avatarPath)),
                               fit: BoxFit.cover,
                             )
                           : null,
@@ -404,6 +437,153 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  // 构建相册内容
+  Widget _buildAlbumContent() {
+    // 使用ValueNotifier作为刷新触发器
+    return FutureBuilder<List<AssetEntity>>(
+      key: _albumKey, // 使用key强制刷新
+      future: AlbumService().getAllPhotos(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: CircularProgressIndicator(
+              color: Colors.white70,
+            ),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return Center(
+            child: Text(
+              "加载相册失败: ${snapshot.error}",
+              style: TextStyle(color: Colors.white.withOpacity(0.7)),
+            ),
+          );
+        }
+
+        final photos = snapshot.data ?? [];
+
+        if (photos.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                SvgPicture.asset(
+                  'assets/icons/photo_album.svg',
+                  width: 60,
+                  height: 60,
+                  colorFilter: ColorFilter.mode(
+                    Colors.white.withOpacity(0.7),
+                    BlendMode.srcIn,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  "还没有照片，去拍一张吧",
+                  style: TextStyle(color: Colors.white.withOpacity(0.7)),
+                ),
+              ],
+            ),
+          );
+        }
+
+        // 有照片时，显示网格
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20.0),
+          child: GridView.builder(
+            padding: const EdgeInsets.only(top: 10),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              mainAxisSpacing: 8,
+              crossAxisSpacing: 8,
+            ),
+            itemCount: photos.length,
+            itemBuilder: (context, index) {
+              final photo = photos[index];
+              return GestureDetector(
+                onTap: () async {
+                  // 获取照片文件
+                  final file = await photo.file;
+                  if (file != null && context.mounted) {
+                    // 直接跳转到照片预览界面
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => PhotoViewScreen(
+                          imagePath: file.path,
+                          allPhotos: photos,
+                          initialIndex: index,
+                          onDelete: () async {
+                            try {
+                              // 直接使用系统提示删除照片，不再显示确认对话框
+                              final result =
+                                  await PhotoManager.editor.deleteWithIds(
+                                [photo.id],
+                              );
+
+                              if (result.isNotEmpty && context.mounted) {
+                                // 照片删除成功，刷新相册
+                                _refreshAlbum();
+                              }
+                            } catch (e) {
+                              debugPrint('删除照片失败: $e');
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('删除照片失败: $e')),
+                                );
+                              }
+                            }
+                          },
+                          onShare: () {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('分享功能即将上线')),
+                            );
+                          },
+                        ),
+                      ),
+                    ).then((_) {
+                      // 返回时刷新相册
+                      _refreshAlbum();
+                    });
+                  }
+                },
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: FutureBuilder<Uint8List?>(
+                    future: photo.thumbnailData,
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.done &&
+                          snapshot.data != null) {
+                        return Image.memory(
+                          snapshot.data!,
+                          fit: BoxFit.cover,
+                        );
+                      } else {
+                        return Container(
+                          color: Colors.grey[800],
+                          child: const Center(
+                            child: SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white70,
+                              ),
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 
@@ -562,9 +742,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final XFile? image = await picker.pickImage(source: ImageSource.gallery);
 
     if (image != null) {
-      setState(() {
-        avatarPath = image.path;
-      });
+      // 使用ProfileProvider保存头像路径
+      final profileProvider =
+          Provider.of<ProfileProvider>(context, listen: false);
+      await profileProvider.setAvatarPath(image.path);
     }
   }
 
@@ -612,12 +793,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   nickname = newNickname;
                 });
 
-                // 显示成功提示
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('昵称修改成功')),
-                  );
-                }
+                // 移除成功提示
               }
             },
             child: const Text('确定'),
@@ -633,9 +809,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final XFile? image = await picker.pickImage(source: ImageSource.gallery);
 
     if (image != null) {
-      setState(() {
-        backgroundImagePath = image.path;
-      });
+      // 使用ProfileProvider保存背景图片路径
+      final profileProvider =
+          Provider.of<ProfileProvider>(context, listen: false);
+      await profileProvider.setBackgroundImagePath(image.path);
     }
+  }
+
+  // 刷新相册
+  void _refreshAlbum() {
+    setState(() {
+      // 强制刷新相册
+    });
   }
 }

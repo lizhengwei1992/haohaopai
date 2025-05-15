@@ -13,6 +13,8 @@ import 'home/settings_screen.dart';
 import 'login/auth_provider.dart';
 import 'login/login_page.dart';
 import 'utils/app_theme.dart';
+import 'utils/profile_provider.dart';
+import 'utils/settings_provider.dart';
 
 Future<void> main() async {
   // 确保Flutter绑定初始化
@@ -32,6 +34,8 @@ Future<void> main() async {
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(create: (_) => ProfileProvider()),
+        ChangeNotifierProvider(create: (_) => SettingsProvider()),
         ChangeNotifierProvider.value(value: CameraStateManager.instance),
       ],
       child: const MyApp(),
