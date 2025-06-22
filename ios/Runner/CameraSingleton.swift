@@ -179,6 +179,11 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     
     // MARK: - 公共方法
     
+    /// 检查相机是否已准备就绪（接受回调函数）
+    func isCameraReady(completion: @escaping (Bool) -> Void) {
+        completion(isInitialized && isRunning)
+    }
+    
     /// 检查相机是否已准备就绪
     func isCameraReady(_ result: FlutterResult) {
         result(isCameraInitialized)
@@ -1866,6 +1871,171 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         UIGraphicsEndImageContext()
         
         print("【拍照流程】强制重绘后图像尺寸: \(rotatedImage.size.width) x \(rotatedImage.size.height)")
+        
+        return rotatedImage
+    }
+    
+    // MARK: - 教我拍功能
+
+    /// 捕获当前预览帧
+    /// - Parameter completion: 完成回调，返回图像数据或错误
+    func captureCurrentPreviewFrame(completion: @escaping (Data?, String?) -> Void) {
+        // 确保在主线程执行
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else {
+                completion(nil, "相机单例实例不可用")
+                return
+            }
+            
+            // 检查相机会话是否在运行
+            guard isRunning else {
+                completion(nil, "相机会话未运行")
+                return
+            }
+            
+            // 方法1：从预览层直接获取当前帧（最轻量级，速度最快）
+            if let previewLayer = self.previewLayer {
+                NSLog("TeachCaptureHandler: 从预览层获取当前帧")
+                
+                // 创建与预览层大小相同的图形上下文
+                UIGraphicsBeginImageContextWithOptions(previewLayer.bounds.size, false, UIScreen.main.scale)
+                
+                if let context = UIGraphicsGetCurrentContext() {
+                    // 将预览层渲染到上下文
+                    previewLayer.render(in: context)
+                    
+                    // 从上下文获取图像
+                    if let image = UIGraphicsGetImageFromCurrentImageContext() {
+                        UIGraphicsEndImageContext()
+                        
+                        // 压缩图像为JPEG数据
+                        if let imageData = image.jpegData(compressionQuality: 0.8) {
+                            NSLog("TeachCaptureHandler: 成功从预览层获取当前帧，数据大小: \(imageData.count) 字节")
+                            completion(imageData, nil)
+                            return
+                        }
+                    }
+                    UIGraphicsEndImageContext()
+                }
+            }
+            
+            // 方法2：如果预览层方法失败，尝试使用photoOutput（备选方案）
+            guard let photoOutput = self.photoOutput else {
+                completion(nil, "照片输出未配置")
+                return
+            }
+            
+            NSLog("TeachCaptureHandler: 使用photoOutput捕获预览帧（备选方案）")
+            
+            // 创建拍照设置
+            let settings = AVCapturePhotoSettings()
+            
+            // 设置低分辨率，提高速度
+            settings.isHighResolutionPhotoEnabled = false
+            
+            // 创建一次性的照片捕获处理器
+            let photoCaptureProcessor = OneShotPhotoCaptureProcessor { (data, error) in
+                if let error = error {
+                    NSLog("TeachCaptureHandler: 捕获预览帧失败: \(error)")
+                    completion(nil, "捕获预览帧失败: \(error)")
+                    return
+                }
+                
+                guard let imageData = data else {
+                    NSLog("TeachCaptureHandler: 未获取到预览帧数据")
+                    completion(nil, "未获取到预览帧数据")
+                    return
+                }
+                
+                // 压缩图像以减小大小
+                guard let image = UIImage(data: imageData),
+                      let compressedData = image.jpegData(compressionQuality: 0.7) else {
+                    completion(nil, "无法压缩图像数据")
+                    return
+                }
+                
+                NSLog("TeachCaptureHandler: 成功捕获预览帧，数据大小: \(compressedData.count) 字节")
+                completion(compressedData, nil)
+            }
+            
+            // 执行拍照
+            photoOutput.capturePhoto(with: settings, delegate: photoCaptureProcessor)
+        }
+    }
+    
+    /// 一次性照片捕获处理器
+    private class OneShotPhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelegate {
+        private let completion: (Data?, String?) -> Void
+        
+        init(completion: @escaping (Data?, String?) -> Void) {
+            self.completion = completion
+            super.init()
+        }
+        
+        func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+            if let error = error {
+                completion(nil, error.localizedDescription)
+                return
+            }
+            
+            guard let imageData = photo.fileDataRepresentation() else {
+                completion(nil, "无法获取照片数据")
+                return
+            }
+            
+            completion(imageData, nil)
+        }
+    }
+
+    /// 根据设备方向旋转图像
+    /// - Parameters:
+    ///   - image: 原始图像
+    ///   - orientation: 设备方向
+    /// - Returns: 旋转后的图像
+    private func orientImage(_ image: CIImage, forDeviceOrientation orientation: UIDeviceOrientation) -> CIImage {
+        var rotationAngle: CGFloat = 0.0
+        
+        switch orientation {
+        case .portrait:
+            // 竖直方向，不需要旋转
+            rotationAngle = 0
+        case .portraitUpsideDown:
+            // 倒置竖直方向，旋转180度
+            rotationAngle = .pi
+        case .landscapeLeft:
+            // 横向左，旋转90度
+            rotationAngle = .pi / 2
+        case .landscapeRight:
+            // 横向右，旋转270度
+            rotationAngle = -.pi / 2
+        default:
+            // 其他情况默认不旋转
+            rotationAngle = 0
+        }
+        
+        // 如果角度为0，不需要旋转
+        if rotationAngle == 0 {
+            return image
+        }
+        
+        // 计算旋转后的图像
+        let transform = CGAffineTransform(rotationAngle: rotationAngle)
+        
+        // 根据是否需要调整大小来应用变换
+        var rotatedImage = image.transformed(by: transform)
+        
+        // 如果是90度或270度旋转，需要调整图像位置，使其居中
+        if orientation == .landscapeLeft || orientation == .landscapeRight {
+            let originalSize = image.extent.size
+            let rotatedSize = rotatedImage.extent.size
+            
+            // 计算偏移量，使旋转后的图像居中
+            let xOffset = (rotatedSize.width - originalSize.height) / 2
+            let yOffset = (rotatedSize.height - originalSize.width) / 2
+            
+            // 应用偏移变换
+            rotatedImage = rotatedImage.transformed(by: CGAffineTransform(translationX: -xOffset, y: -yOffset))
+        }
         
         return rotatedImage
     }

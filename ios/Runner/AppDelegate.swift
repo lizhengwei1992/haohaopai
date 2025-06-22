@@ -59,6 +59,9 @@ import PhotosUI
         }
     }
     
+    // 注册教我拍功能处理器
+    TeachCaptureHandler.shared.registerMethodChannel(messenger: controller.binaryMessenger)
+    
     // 预热相机权限，提高相机启动速度
     self.preheatCameraPermission()
     

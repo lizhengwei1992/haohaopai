@@ -15,6 +15,8 @@ import '../controls/zoom_control.dart';
 import '../actions/capture_action.dart';
 import '../actions/album_action.dart';
 import '../actions/guide_action.dart';
+import '../../aitips/providers/ai_tip_provider.dart';
+import '../../aitips/widgets/ai_tip_animation.dart';
 
 // 网格线绘制器
 class GridPainter extends CustomPainter {
@@ -78,6 +80,13 @@ class _CameraScreenState extends State<CameraScreen>
 
     // 添加应用生命周期监听
     WidgetsBinding.instance.addObserver(this);
+
+    // 确保进入相机页面时"教我拍"功能是干净的初始状态
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final aiTipProvider = Provider.of<AiTipProvider>(context, listen: false);
+      aiTipProvider.reset();
+      debugPrint('📸 进入相机页面，重置教我拍状态到初始状态');
+    });
 
     // 初始化相机
     _initCamera();
@@ -359,6 +368,11 @@ class _CameraScreenState extends State<CameraScreen>
 
   @override
   void dispose() {
+    // 强制停止教我拍流程，防止动画残留
+    final aiTipProvider = Provider.of<AiTipProvider>(context, listen: false);
+    aiTipProvider.forceStop();
+    debugPrint('📸 离开相机页面，强制停止教我拍流程并重置所有状态');
+
     // 不再释放相机控制器，而是保留全局实例
     // 只在应用退出时才真正释放资源
 
@@ -378,6 +392,12 @@ class _CameraScreenState extends State<CameraScreen>
         debugPrint('应用回到前台，恢复相机');
         _nativeCameraController?.resumePreview();
 
+        // 应用回到前台时，完全重置教我拍状态，确保状态干净
+        final aiTipProvider =
+            Provider.of<AiTipProvider>(context, listen: false);
+        aiTipProvider.reset();
+        debugPrint('📸 应用回到前台时重置教我拍状态，确保状态干净');
+
         // 应用回到前台时，重新应用相机设置
         Future.delayed(const Duration(milliseconds: 300), () {
           if (_nativeCameraController != null) {
@@ -390,6 +410,12 @@ class _CameraScreenState extends State<CameraScreen>
       case AppLifecycleState.hidden:
         debugPrint('应用进入后台，暂停相机');
         _nativeCameraController?.pausePreview();
+
+        // 应用进入后台时强制停止教我拍流程
+        final aiTipProvider =
+            Provider.of<AiTipProvider>(context, listen: false);
+        aiTipProvider.forceStop();
+        debugPrint('📸 应用进入后台时强制停止教我拍流程');
         break;
       case AppLifecycleState.detached:
         // 应用被终止，相机资源会在dispose中处理
@@ -671,6 +697,28 @@ class _CameraScreenState extends State<CameraScreen>
                     ),
                   ],
                 ),
+              ),
+
+              // AI拍摄建议动画 - 放在Stack的最顶层
+              Consumer<AiTipProvider>(
+                builder: (context, provider, child) {
+                  final bool shouldBlockHitTest =
+                      provider.state == AiTipState.analyzing ||
+                          (provider.state == AiTipState.showingTips &&
+                              provider.isProcessing);
+
+                  return AbsorbPointer(
+                    // 在分析中或显示建议时阻断点击事件，确保用户只能专注于"教我拍"功能
+                    absorbing: shouldBlockHitTest,
+                    child: AiTipAnimation(
+                      tips: provider.tips,
+                      isAnalyzing: provider.state == AiTipState.analyzing,
+                      onTipsVisibilityChanged: (visible) {
+                        debugPrint('教我拍提示可见性: $visible');
+                      },
+                    ),
+                  );
+                },
               ),
             ],
           ),

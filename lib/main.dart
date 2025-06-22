@@ -15,6 +15,7 @@ import 'login/login_page.dart';
 import 'utils/app_theme.dart';
 import 'utils/profile_provider.dart';
 import 'utils/settings_provider.dart';
+import 'aitips/providers/ai_tip_provider.dart';
 
 Future<void> main() async {
   // 确保Flutter绑定初始化
@@ -37,6 +38,7 @@ Future<void> main() async {
         ChangeNotifierProvider(create: (_) => ProfileProvider()),
         ChangeNotifierProvider(create: (_) => SettingsProvider()),
         ChangeNotifierProvider.value(value: CameraStateManager.instance),
+        ChangeNotifierProvider(create: (_) => AiTipProvider()),
       ],
       child: const MyApp(),
     ),

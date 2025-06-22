@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +11,10 @@ class NativeCameraService {
   // 平台通道
   static const MethodChannel _channel =
       MethodChannel('com.haohaopai.app/native_camera');
+
+  // 教我拍功能通道
+  static const MethodChannel _teachCaptureChannel =
+      MethodChannel('com.haohaopai.app/teach_capture');
 
   // 初始化完成的Completer
   final Completer<bool> _initializationCompleter = Completer<bool>();
@@ -25,6 +30,23 @@ class NativeCameraService {
 
   // 静态实例
   static final NativeCameraService instance = NativeCameraService._();
+
+  /// 教我拍功能：获取当前预览帧
+  static Future<Uint8List?> captureCurrentPreviewFrame() async {
+    if (!Platform.isIOS) return null;
+
+    try {
+      final result =
+          await _teachCaptureChannel.invokeMethod('captureCurrentFrame');
+      if (result is Uint8List) {
+        return result;
+      }
+      return null;
+    } catch (e) {
+      debugPrint('获取预览帧出错: $e');
+      return null;
+    }
+  }
 
   /// 获取全局相机控制器
   NativeCameraController? getGlobalCameraController() {
