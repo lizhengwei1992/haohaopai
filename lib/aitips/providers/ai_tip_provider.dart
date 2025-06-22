@@ -22,6 +22,9 @@ enum AiTipState {
 class AiTipProvider with ChangeNotifier {
   final _aiTipService = AiTipService();
 
+  // 用于检查Provider是否已被销毁
+  bool _disposed = false;
+
   // 当前状态
   AiTipState _state = AiTipState.initial;
   AiTipState get state => _state;
@@ -104,6 +107,7 @@ class AiTipProvider with ChangeNotifier {
 
   /// 重置状态
   void reset() {
+    if (_disposed) return; // 如果已销毁，不更新状态
     _state = AiTipState.initial;
     _tips.clear();
     _errorMessage = '';
@@ -112,7 +116,14 @@ class AiTipProvider with ChangeNotifier {
 
   /// 设置状态
   void _setState(AiTipState newState) {
+    if (_disposed) return; // 如果已销毁，不更新状态
     _state = newState;
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
   }
 }
