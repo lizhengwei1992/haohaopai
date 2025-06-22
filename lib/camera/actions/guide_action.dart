@@ -2,13 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:provider/provider.dart';
 import '../../aitips/providers/ai_tip_provider.dart';
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
 
 /// 教我拍操作组件
 class GuideAction extends StatelessWidget {
-  const GuideAction({Key? key}) : super(key: key);
+  final GlobalKey cameraPreviewKey;
+
+  const GuideAction({Key? key, required this.cameraPreviewKey})
+      : super(key: key);
 
   // 打开教我拍功能
-  void openGuide(BuildContext context) {
+  Future<void> openGuide(BuildContext context) async {
     // 获取AI提示提供者
     final aiTipProvider = Provider.of<AiTipProvider>(context, listen: false);
 
@@ -20,9 +25,17 @@ class GuideAction extends StatelessWidget {
       return;
     }
 
+    // Capture screenshot
+    RenderRepaintBoundary boundary = cameraPreviewKey.currentContext!
+        .findRenderObject() as RenderRepaintBoundary;
+    ui.Image image = await boundary.toImage(pixelRatio: 1.0);
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    final buffer = byteData!.buffer.asUint8List();
+    image.dispose();
+
     // 开始分析图像
     debugPrint('💡 开始教我拍流程');
-    aiTipProvider.analyzeImage();
+    aiTipProvider.analyzeImage(buffer);
   }
 
   @override

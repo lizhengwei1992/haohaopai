@@ -17,6 +17,7 @@ import '../actions/album_action.dart';
 import '../actions/guide_action.dart';
 import '../../aitips/providers/ai_tip_provider.dart';
 import '../../aitips/widgets/ai_tip_animation.dart';
+import '../../aitips/widgets/ai_vision_core_animation.dart';
 
 // 网格线绘制器
 class GridPainter extends CustomPainter {
@@ -61,6 +62,7 @@ class CameraScreen extends StatefulWidget {
 
 class _CameraScreenState extends State<CameraScreen>
     with WidgetsBindingObserver {
+  final GlobalKey _cameraPreviewKey = GlobalKey();
   // 相机服务
   final CameraService _cameraService = CameraService.instance;
   final CameraStateManager _stateManager = CameraStateManager.instance;
@@ -468,129 +470,134 @@ class _CameraScreenState extends State<CameraScreen>
                       top: previewParams.topPosition,
                       left: 0,
                       right: 0,
-                      child: SizedBox(
-                        width: previewParams.width,
-                        height: previewParams.height,
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              // 相机预览 - 使用原生相机或占位符表示
-                              GestureDetector(
-                                // onTapDown 已恢复，现在再次注释掉以移除对焦功能
-                                // onTapDown: (TapDownDetails details) {
-                                //   // 获取点击位置
-                                //   final RenderBox box =
-                                //       context.findRenderObject() as RenderBox;
-                                //   final Offset localPosition =
-                                //       box.globalToLocal(details.globalPosition);
-                                //
-                                //   // 计算点击位置相对于预览框的偏移
-                                //   final Offset adjustedPosition = Offset(
-                                //       localPosition.dx,
-                                //       localPosition.dy -
-                                //           previewParams.topPosition);
-                                //
-                                //   // 设置对焦点
-                                //   _setFocusPoint(
-                                //       adjustedPosition,
-                                //       BoxConstraints(
-                                //           maxWidth: previewParams.width,
-                                //           maxHeight: previewParams.height));
-                                // },
+                      child: RepaintBoundary(
+                        key: _cameraPreviewKey,
+                        child: SizedBox(
+                          width: previewParams.width,
+                          height: previewParams.height,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                // 相机预览 - 使用原生相机或占位符表示
+                                GestureDetector(
+                                  // onTapDown 已恢复，现在再次注释掉以移除对焦功能
+                                  // onTapDown: (TapDownDetails details) {
+                                  //   // 获取点击位置
+                                  //   final RenderBox box =
+                                  //       context.findRenderObject() as RenderBox;
+                                  //   final Offset localPosition =
+                                  //       box.globalToLocal(details.globalPosition);
+                                  //
+                                  //   // 计算点击位置相对于预览框的偏移
+                                  //   final Offset adjustedPosition = Offset(
+                                  //       localPosition.dx,
+                                  //       localPosition.dy -
+                                  //           previewParams.topPosition);
+                                  //
+                                  //   // 设置对焦点
+                                  //   _setFocusPoint(
+                                  //       adjustedPosition,
+                                  //       BoxConstraints(
+                                  //           maxWidth: previewParams.width,
+                                  //           maxHeight: previewParams.height));
+                                  // },
 
-                                // 保留缩放手势功能
-                                onScaleStart: (details) {
-                                  // 前置摄像头禁用缩放功能
-                                  if (_stateManager.currentCameraType ==
-                                      'front') {
-                                    return;
-                                  }
-                                  _stateManager.baseScaleLevel =
-                                      _stateManager.currentZoomLevel;
-                                },
-                                onScaleUpdate: (details) {
-                                  // 前置摄像头禁用缩放功能
-                                  if (_stateManager.currentCameraType ==
-                                      'front') {
-                                    return;
-                                  }
+                                  // 保留缩放手势功能
+                                  onScaleStart: (details) {
+                                    // 前置摄像头禁用缩放功能
+                                    if (_stateManager.currentCameraType ==
+                                        'front') {
+                                      return;
+                                    }
+                                    _stateManager.baseScaleLevel =
+                                        _stateManager.currentZoomLevel;
+                                  },
+                                  onScaleUpdate: (details) {
+                                    // 前置摄像头禁用缩放功能
+                                    if (_stateManager.currentCameraType ==
+                                        'front') {
+                                      return;
+                                    }
 
-                                  // 增加判断：如果相机正在切换，则忽略缩放更新
-                                  if (_stateManager.isCameraChanging) {
-                                    debugPrint('相机正在切换，忽略本次缩放更新');
-                                    return;
-                                  }
+                                    // 增加判断：如果相机正在切换，则忽略缩放更新
+                                    if (_stateManager.isCameraChanging) {
+                                      debugPrint('相机正在切换，忽略本次缩放更新');
+                                      return;
+                                    }
 
-                                  if (details.scale != 1.0) {
-                                    // 计算新的缩放级别
-                                    double newZoom =
-                                        _stateManager.baseScaleLevel *
-                                            details.scale;
+                                    if (details.scale != 1.0) {
+                                      // 计算新的缩放级别
+                                      double newZoom =
+                                          _stateManager.baseScaleLevel *
+                                              details.scale;
 
-                                    // 直接调用 CameraStateManager 的 setZoom 方法
-                                    _stateManager.setZoom(newZoom);
+                                      // 直接调用 CameraStateManager 的 setZoom 方法
+                                      _stateManager.setZoom(newZoom);
 
-                                    // 打印当前缩放级别，用于调试
-                                    debugPrint(
-                                        '当前缩放级别: ${_stateManager.currentZoomLevel.toStringAsFixed(2)}');
-                                  }
-                                },
-                                onScaleEnd: (details) {
-                                  // 前置摄像头禁用缩放功能
-                                  if (_stateManager.currentCameraType ==
-                                      'front') {
-                                    return;
-                                  }
-                                  _stateManager.baseScaleLevel =
-                                      _stateManager.currentZoomLevel;
-                                },
+                                      // 打印当前缩放级别，用于调试
+                                      debugPrint(
+                                          '当前缩放级别: ${_stateManager.currentZoomLevel.toStringAsFixed(2)}');
+                                    }
+                                  },
+                                  onScaleEnd: (details) {
+                                    // 前置摄像头禁用缩放功能
+                                    if (_stateManager.currentCameraType ==
+                                        'front') {
+                                      return;
+                                    }
+                                    _stateManager.baseScaleLevel =
+                                        _stateManager.currentZoomLevel;
+                                  },
 
-                                child: Stack(
-                                  children: [
-                                    // 如果原生相机初始化成功，显示NativeCameraView
-                                    if (Platform.isIOS)
-                                      NativeCameraView(
-                                        controller: _nativeCameraController,
-                                        backgroundColor:
-                                            const Color(0xFF1A1A1A),
-                                        onCreated: () {
-                                          _initializeNativeCamera();
+                                  child: Stack(
+                                    children: [
+                                      // 如果原生相机初始化成功，显示NativeCameraView
+                                      if (Platform.isIOS)
+                                        NativeCameraView(
+                                          controller: _nativeCameraController,
+                                          backgroundColor:
+                                              const Color(0xFF1A1A1A),
+                                          onCreated: () {
+                                            _initializeNativeCamera();
+                                          },
+                                        ),
+                                      // 同时显示一个半透明覆盖层，保持接收手势事件
+                                      Container(
+                                        color: Colors.transparent,
+                                      ),
+
+                                      // 添加网格线
+                                      ListenableBuilder(
+                                        listenable: _stateManager,
+                                        builder: (context, _) {
+                                          return _stateManager.showGridLines
+                                              ? CustomPaint(
+                                                  painter: GridPainter(),
+                                                  size: Size.infinite,
+                                                )
+                                              : const SizedBox.shrink();
                                         },
                                       ),
-                                    // 同时显示一个半透明覆盖层，保持接收手势事件
-                                    Container(
-                                      color: Colors.transparent,
-                                    ),
 
-                                    // 添加网格线
-                                    ListenableBuilder(
-                                      listenable: _stateManager,
-                                      builder: (context, _) {
-                                        return _stateManager.showGridLines
-                                            ? CustomPaint(
-                                                painter: GridPainter(),
-                                                size: Size.infinite,
-                                              )
-                                            : const SizedBox.shrink();
-                                      },
-                                    ),
-
-                                    // 在 NativeCameraView 上层添加加载指示器
-                                    if (_stateManager.isCameraChanging)
-                                      Positioned.fill(
-                                        child: Container(
-                                          color: Colors.black.withOpacity(0.5),
-                                          child: const Center(
-                                              child: CircularProgressIndicator(
-                                                  color: Colors.white)),
+                                      // 在 NativeCameraView 上层添加加载指示器
+                                      if (_stateManager.isCameraChanging)
+                                        Positioned.fill(
+                                          child: Container(
+                                            color:
+                                                Colors.black.withOpacity(0.5),
+                                            child: const Center(
+                                                child:
+                                                    CircularProgressIndicator(
+                                                        color: Colors.white)),
+                                          ),
                                         ),
-                                      ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -666,14 +673,11 @@ class _CameraScreenState extends State<CameraScreen>
                       left: 0,
                       right: 0,
                       child: Container(
-                        height: 96, // 使用固定高度，确保足够空间
+                        height: 96,
                         child: Stack(
                           alignment: Alignment.center,
                           children: [
-                            // 中间拍摄按钮
                             const Center(child: CaptureAction()),
-
-                            // 左右两侧按钮的容器
                             Container(
                               width: double.infinity,
                               child: Padding(
@@ -682,11 +686,10 @@ class _CameraScreenState extends State<CameraScreen>
                                 child: Row(
                                   mainAxisAlignment:
                                       MainAxisAlignment.spaceBetween,
-                                  children: const [
-                                    // 左侧相册按钮
-                                    AlbumAction(),
-                                    // 右侧教我拍按钮
-                                    GuideAction(),
+                                  children: [
+                                    const AlbumAction(),
+                                    GuideAction(
+                                        cameraPreviewKey: _cameraPreviewKey),
                                   ],
                                 ),
                               ),
@@ -699,25 +702,33 @@ class _CameraScreenState extends State<CameraScreen>
                 ),
               ),
 
-              // AI拍摄建议动画 - 放在Stack的最顶层
+              // AI UI Layer
               Consumer<AiTipProvider>(
                 builder: (context, provider, child) {
-                  final bool shouldBlockHitTest =
-                      provider.state == AiTipState.analyzing ||
-                          (provider.state == AiTipState.showingTips &&
-                              provider.isProcessing);
+                  // Analyzing State -> Show Vision Core Animation
+                  if (provider.isAnalyzing) {
+                    return Positioned(
+                      top: previewParams.topPosition,
+                      left: 0,
+                      width: previewParams.width,
+                      height: previewParams.height,
+                      child: const AiVisionCoreAnimation(),
+                    );
+                  }
 
-                  return AbsorbPointer(
-                    // 在分析中或显示建议时阻断点击事件，确保用户只能专注于"教我拍"功能
-                    absorbing: shouldBlockHitTest,
-                    child: AiTipAnimation(
-                      tips: provider.tips,
-                      isAnalyzing: provider.state == AiTipState.analyzing,
+                  // Showing Tips State -> Show Tips Display
+                  if (provider.state == AiTipState.showingTips) {
+                    return AiTipAnimation(
+                      tips: provider.tips.map((tip) => tip.toAiTip()).toList(),
+                      isAnalyzing: false, // Explicitly false
                       onTipsVisibilityChanged: (visible) {
                         debugPrint('教我拍提示可见性: $visible');
                       },
-                    ),
-                  );
+                    );
+                  }
+
+                  // Default empty state
+                  return const SizedBox.shrink();
                 },
               ),
             ],
