@@ -23,23 +23,28 @@ class AiTipService {
 
   /// 获取当前预览场景的拍摄建议
   ///
+  /// [imageBytes] 可选的图像字节数据，如果为null则尝试从相机获取预览帧
+  ///
   /// 返回包含以下字段的Map：
   /// - success: 是否获取成功
   /// - tips: 拍摄建议列表 (List<AiTip>)
   /// - scene: 识别的场景类型
   /// - confidence: 置信度
   /// - error: 错误信息（如果发生错误）
-  Future<Map<String, dynamic>> getCaptureTips() async {
+  Future<Map<String, dynamic>> getCaptureTips([Uint8List? imageBytes]) async {
     // 最大重试次数
     const int maxRetries = 2;
     int retryCount = 0;
 
     while (retryCount <= maxRetries) {
       try {
-        // 1. 从相机捕获当前预览帧
-        debugPrint('尝试获取预览帧 (尝试 ${retryCount + 1}/${maxRetries + 1})');
-        final imageData =
-            await NativeCameraService.captureCurrentPreviewFrame();
+        // 1. 获取图像数据（优先使用传入的参数，否则从相机捕获）
+        Uint8List? imageData = imageBytes;
+
+        if (imageData == null) {
+          debugPrint('尝试获取预览帧 (尝试 ${retryCount + 1}/${maxRetries + 1})');
+          imageData = await NativeCameraService.captureCurrentPreviewFrame();
+        }
 
         if (imageData == null) {
           debugPrint('无法获取当前预览帧');
@@ -55,7 +60,7 @@ class AiTipService {
           continue;
         }
 
-        debugPrint('成功获取预览帧，大小: ${imageData.length} 字节');
+        debugPrint('成功获取图像数据，大小: ${imageData.length} 字节');
 
         // 2. 将图像数据发送到服务器进行分析
         return await _analyzeImageWithServer(imageData);

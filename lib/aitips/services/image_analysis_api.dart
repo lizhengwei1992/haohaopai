@@ -9,17 +9,36 @@ import '../models/shooting_tip.dart';
 class ImageAnalysisService {
   final _dio = Dio();
   static const String _analysisPrompt =
-      "你是一个专业人像摄影指导师，请根据用户上传的照片，严格按照JSON格式输出分析结果，包含以下4个键：\n"
-      "{\n"
-      "  \"构图\": \"以九宫格为基本框架提供构图建议，比如人物在九宫格的哪个位置，背景是否简洁，是否需要留白等\",\n"
-      "  \"角度\": \"直接给出拍摄角度的建议（如仰拍显高/平视自然等）\",\n"
-      "  \"光线\": \"判断光线方向和质量问题，直接提出补光/时间/位置调整方案\",\n"
-      "  \"动作\": \"提供1个可操作动作指令（如肢体动作+眼神方向+拍摄方式）\"\n"
-      "}\n\n"
-      "要求：\n"
-      "1. 每个值必须用中文双引号包裹\n"
-      "2. 禁止使用Markdown格式\n"
-      "3. 语言精炼，每条意见最多50个字）";
+      """你现在是一名 **专业摄影师与摄影导师**。我会给你一张照片或相机取景框画面，请分析这张图像并从以下维度提出**具体、专业、可执行的拍照建议**：
+
+1. **构图与画面布局**
+   - 分析主体位置与背景元素的关系
+   - 是否遵循构图法则：三分法、引导线、对称/不对称、留白/负空间等
+   - 是否有需要重新取景或调整角度的建议
+
+2. **主体与焦点**
+   - 判定主体是否明显清晰
+   - 是否有干扰元素
+   - 焦点是否准确落在要表达的地方
+
+3. **光线与曝光**
+   - 现有光线的方向、强度、质感（顺光/侧光/逆光/柔光/硬光）
+   - 曝光是否准确，有无过曝/欠曝
+   - 提出可调节光线或利用反光/柔光方式的实用建议
+
+4. **色彩与对比**
+   - 色彩主题是否协调
+   - 是否存在色彩冲突或色偏
+   - 如何利用色彩对比增强主体表现力
+
+请严格按照以下JSON格式输出分析结果：
+{
+  "构图与画面布局": "基于三分法、引导线、对称等构图原则，指出当前画面的构图问题，并给出具体调整方案",
+  "主体与焦点": "根据拍摄对象特征（如身高、脸型、身材比例），给出最合适的拍摄角度建议（如平视、仰拍、俯拍等）",
+  "光线与曝光": "分析当前光线的方向、强度和质量，指出光线问题（如逆光、阴影、光线不足），并提供补光或调整拍摄方向的具体方案",
+  "色彩与对比": "xxxx"
+}
+""";
 
   // 直接使用图像字节数据进行分析（无需保存文件）
   Future<List<ShootingTip>> analyzeImageBytes(Uint8List imageBytes) async {
@@ -43,7 +62,7 @@ class ImageAnalysisService {
       final response = await _dio.post(
         'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
         data: {
-          'model': 'qwen-vl-plus',
+          'model': 'qwen3-vl-plus', // 使用最新的视觉理解模型
           'response_format': {'type': 'json_object'},
           'messages': [
             {
@@ -81,26 +100,23 @@ class ImageAnalysisService {
       debugPrint('📊 AI分析失败，总耗时: ${totalTime}ms');
       debugPrint('分析出错: $e');
 
-      // 模拟数据保持不变
-      return [
-        ShootingTip(type: '构图', text: '建议将主体置于九宫格右下交点', priority: 1),
-        ShootingTip(type: '角度', text: '当前光线偏暗,建议调整角度避免逆光', priority: 2),
-        ShootingTip(type: '光线', text: '尝试降低拍摄角度,突出主体', priority: 3),
-        ShootingTip(type: '动作', text: '尝试自然微笑并略微侧身,增加照片活力', priority: 4),
-      ];
+      // 降级到默认建议
+      return _getDefaultTips();
     }
   }
 
   List<ShootingTip> _parseAIResponse(String content) {
     try {
       // 使用正则表达式提取符合格式的JSON内容
+      // 匹配新的4个字段：构图与画面布局、主体与焦点、光线与曝光、色彩与对比
       final regex = RegExp(
-        r'\{[\s\S]*?"构图":[\s\S]*?"角度":[\s\S]*?"光线":[\s\S]*?"动作":[\s\S]*?\}',
+        r'\{[\s\S]*?"构图与画面布局":[\s\S]*?"主体与焦点":[\s\S]*?"光线与曝光":[\s\S]*?"色彩与对比":[\s\S]*?\}',
       );
       final match = regex.firstMatch(content);
 
       if (match == null) {
         debugPrint('📊 未找到符合格式的JSON内容');
+        debugPrint('📊 原始内容预览: ${content.length > 200 ? content.substring(0, 200) : content}');
         return _getDefaultTips();
       }
 
@@ -111,8 +127,8 @@ class ImageAnalysisService {
       final tips = <ShootingTip>[];
       int priority = 1;
 
-      // 解析JSON并创建ShootingTip对象
-      for (final key in ['构图', '光线', '角度', '动作']) {
+      // 解析JSON并创建ShootingTip对象（按照新提示词的字段顺序）
+      for (final key in ['构图与画面布局', '主体与焦点', '光线与曝光', '色彩与对比']) {
         if (jsonContent.containsKey(key)) {
           tips.add(
             ShootingTip(
@@ -128,17 +144,18 @@ class ImageAnalysisService {
       return tips.isNotEmpty ? tips : _getDefaultTips();
     } catch (e) {
       debugPrint('📊 解析AI响应出错: ${e.toString()}');
+      debugPrint('📊 错误详情: $e');
       return _getDefaultTips();
     }
   }
 
-  // 添加默认建议的辅助方法
+  // 添加默认建议的辅助方法（更新为新的4个维度）
   List<ShootingTip> _getDefaultTips() {
     return [
-      ShootingTip(type: '构图', text: '建议将主体置于九宫格右下交点', priority: 1),
-      ShootingTip(type: '光线', text: '当前光线偏暗,建议调整角度避免逆光', priority: 2),
-      ShootingTip(type: '角度', text: '尝试降低拍摄角度,突出主体', priority: 3),
-      ShootingTip(type: '动作', text: '尝试自然微笑并略微侧身,增加照片活力', priority: 4),
+      const ShootingTip(type: '构图与画面布局', text: '建议将主体置于九宫格右下交点，注意背景简洁', priority: 1),
+      const ShootingTip(type: '主体与焦点', text: '确保主体清晰突出，避免背景干扰', priority: 2),
+      const ShootingTip(type: '光线与曝光', text: '当前光线偏暗，建议调整角度避免逆光或增加补光', priority: 3),
+      const ShootingTip(type: '色彩与对比', text: '调整色彩饱和度增强画面表现力', priority: 4),
     ];
   }
 }

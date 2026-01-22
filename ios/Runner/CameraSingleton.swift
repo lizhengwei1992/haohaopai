@@ -1637,10 +1637,10 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     }
     
     // MARK: - AVCaptureVideoDataOutputSampleBufferDelegate
-    
+
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        // 这里可以处理视频帧
-        // 如果需要实现即时帧处理功能，可以在这里添加代码
+        // 保存最新的视频帧，供"教我拍"功能使用
+        latestSampleBuffer = sampleBuffer
     }
     
     // 清理之前的会话
@@ -1877,7 +1877,10 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     
     // MARK: - 教我拍功能
 
-    /// 捕获当前预览帧
+    // 当前最新的视频帧缓冲（用于教我拍功能）
+    private var latestSampleBuffer: CMSampleBuffer?
+
+    /// 捕获当前预览帧（从视频流中获取，不触发拍照）
     /// - Parameter completion: 完成回调，返回图像数据或错误
     func captureCurrentPreviewFrame(completion: @escaping (Data?, String?) -> Void) {
         // 确保在主线程执行
@@ -1886,105 +1889,84 @@ class CameraSingleton: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                 completion(nil, "相机单例实例不可用")
                 return
             }
-            
+
             // 检查相机会话是否在运行
             guard isRunning else {
                 completion(nil, "相机会话未运行")
                 return
             }
-            
-            // 方法1：从预览层直接获取当前帧（最轻量级，速度最快）
-            if let previewLayer = self.previewLayer {
-                NSLog("TeachCaptureHandler: 从预览层获取当前帧")
-                
-                // 创建与预览层大小相同的图形上下文
-                UIGraphicsBeginImageContextWithOptions(previewLayer.bounds.size, false, UIScreen.main.scale)
-                
-                if let context = UIGraphicsGetCurrentContext() {
-                    // 将预览层渲染到上下文
-                    previewLayer.render(in: context)
-                    
-                    // 从上下文获取图像
-                    if let image = UIGraphicsGetImageFromCurrentImageContext() {
-                        UIGraphicsEndImageContext()
-                        
-                        // 压缩图像为JPEG数据
-                        if let imageData = image.jpegData(compressionQuality: 0.8) {
-                            NSLog("TeachCaptureHandler: 成功从预览层获取当前帧，数据大小: \(imageData.count) 字节")
-                            completion(imageData, nil)
-                            return
-                        }
-                    }
-                    UIGraphicsEndImageContext()
-                }
-            }
-            
-            // 方法2：如果预览层方法失败，尝试使用photoOutput（备选方案）
-            guard let photoOutput = self.photoOutput else {
-                completion(nil, "照片输出未配置")
+
+            // 检查是否有可用的视频帧
+            guard let sampleBuffer = self.latestSampleBuffer else {
+                NSLog("TeachCaptureHandler: 没有可用的视频帧")
+                completion(nil, "没有可用的视频帧")
                 return
             }
-            
-            NSLog("TeachCaptureHandler: 使用photoOutput捕获预览帧（备选方案）")
-            
-            // 创建拍照设置
-            let settings = AVCapturePhotoSettings()
-            
-            // 设置低分辨率，提高速度
-            settings.isHighResolutionPhotoEnabled = false
-            
-            // 创建一次性的照片捕获处理器
-            let photoCaptureProcessor = OneShotPhotoCaptureProcessor { (data, error) in
-                if let error = error {
-                    NSLog("TeachCaptureHandler: 捕获预览帧失败: \(error)")
-                    completion(nil, "捕获预览帧失败: \(error)")
-                    return
-                }
-                
-                guard let imageData = data else {
-                    NSLog("TeachCaptureHandler: 未获取到预览帧数据")
-                    completion(nil, "未获取到预览帧数据")
-                    return
-                }
-                
-                // 压缩图像以减小大小
-                guard let image = UIImage(data: imageData),
-                      let compressedData = image.jpegData(compressionQuality: 0.7) else {
-                    completion(nil, "无法压缩图像数据")
-                    return
-                }
-                
-                NSLog("TeachCaptureHandler: 成功捕获预览帧，数据大小: \(compressedData.count) 字节")
-                completion(compressedData, nil)
+
+            NSLog("TeachCaptureHandler: 从视频流中捕获当前帧")
+
+            // 从 CMSampleBuffer 获取图像
+            guard let image = self.imageFromSampleBuffer(sampleBuffer) else {
+                NSLog("TeachCaptureHandler: 无法从视频帧创建图像")
+                completion(nil, "无法从视频帧创建图像")
+                return
             }
-            
-            // 执行拍照
-            photoOutput.capturePhoto(with: settings, delegate: photoCaptureProcessor)
+
+            // 压缩图像为 JPEG，压缩质量 0.7 以平衡质量和大小
+            guard let jpegData = image.jpegData(compressionQuality: 0.7) else {
+                NSLog("TeachCaptureHandler: 无法压缩图像")
+                completion(nil, "无法压缩图像")
+                return
+            }
+
+            NSLog("TeachCaptureHandler: 成功捕获预览帧，数据大小: \(jpegData.count) 字节")
+            completion(jpegData, nil)
         }
     }
-    
-    /// 一次性照片捕获处理器
-    private class OneShotPhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelegate {
-        private let completion: (Data?, String?) -> Void
-        
-        init(completion: @escaping (Data?, String?) -> Void) {
-            self.completion = completion
-            super.init()
+
+    /// 从 CMSampleBuffer 创建 UIImage
+    private func imageFromSampleBuffer(_ sampleBuffer: CMSampleBuffer) -> UIImage? {
+        // 获取 CVImageBuffer
+        guard let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+            return nil
         }
-        
-        func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
-            if let error = error {
-                completion(nil, error.localizedDescription)
-                return
-            }
-            
-            guard let imageData = photo.fileDataRepresentation() else {
-                completion(nil, "无法获取照片数据")
-                return
-            }
-            
-            completion(imageData, nil)
+
+        // 锁定 base address
+        CVPixelBufferLockBaseAddress(imageBuffer, .readOnly)
+        defer {
+            CVPixelBufferUnlockBaseAddress(imageBuffer, .readOnly)
         }
+
+        // 获取图像信息
+        let width = CVPixelBufferGetWidth(imageBuffer)
+        let height = CVPixelBufferGetHeight(imageBuffer)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(imageBuffer)
+
+        // 创建颜色空间
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+
+        // 创建 bitmap context
+        guard let context = CGContext(
+            data: CVPixelBufferGetBaseAddress(imageBuffer),
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        ) else {
+            return nil
+        }
+
+        // 创建 CGImage
+        guard let cgImage = context.makeImage() else {
+            return nil
+        }
+
+        // 创建 UIImage（需要正确的方向）
+        let image = UIImage(cgImage: cgImage, scale: 1.0, orientation: .right)
+
+        return image
     }
 
     /// 根据设备方向旋转图像

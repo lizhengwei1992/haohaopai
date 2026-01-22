@@ -56,9 +56,10 @@ class AiTipProvider with ChangeNotifier {
       _setState(AiTipState.analyzing);
 
       debugPrint('📸 教我拍流程开始 - 状态已设置为分析中');
+      debugPrint('📸 图像数据大小: ${imageBytes.length} 字节');
 
-      // 获取拍摄建议
-      final result = await _aiTipService.getCaptureTips();
+      // 获取拍摄建议（传递截图数据）
+      final result = await _aiTipService.getCaptureTips(imageBytes);
 
       if (result['success'] == true) {
         // 解析结果

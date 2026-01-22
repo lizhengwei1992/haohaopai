@@ -1,9 +1,9 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:provider/provider.dart';
 import '../../aitips/providers/ai_tip_provider.dart';
-import 'dart:ui' as ui;
-import 'package:flutter/rendering.dart';
+import '../services/native_camera_service.dart';
 
 /// 教我拍操作组件
 class GuideAction extends StatelessWidget {
@@ -25,17 +25,21 @@ class GuideAction extends StatelessWidget {
       return;
     }
 
-    // Capture screenshot
-    RenderRepaintBoundary boundary = cameraPreviewKey.currentContext!
-        .findRenderObject() as RenderRepaintBoundary;
-    ui.Image image = await boundary.toImage(pixelRatio: 1.0);
-    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-    final buffer = byteData!.buffer.asUint8List();
-    image.dispose();
+    // 从原生相机捕获当前预览帧
+    debugPrint('💡 开始从原生相机捕获预览帧');
+    final imageBytes = await NativeCameraService.captureCurrentPreviewFrame();
+
+    if (imageBytes == null) {
+      debugPrint('💡 捕获预览帧失败：未获取到图像数据');
+      // TODO: 可以在这里显示错误提示
+      return;
+    }
+
+    debugPrint('💡 成功捕获预览帧，大小: ${imageBytes.length} 字节');
 
     // 开始分析图像
     debugPrint('💡 开始教我拍流程');
-    aiTipProvider.analyzeImage(buffer);
+    aiTipProvider.analyzeImage(imageBytes);
   }
 
   @override

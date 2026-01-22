@@ -43,10 +43,23 @@ class _AiTipAnimationState extends State<AiTipAnimation>
       _viewedTipTypes.length >= math.min(4, widget.tips.length) &&
       widget.tips.isNotEmpty;
 
-  // tips配置 - 按顺时针顺序排列：角度 -> 动作 -> 构图 -> 光线
+  // AI返回的类型名称到简短显示名称的映射
+  static const Map<String, String> _typeDisplayNameMap = {
+    '构图与画面布局': '构图',
+    '主体与焦点': '焦点',
+    '光线与曝光': '光线',
+    '色彩与对比': '色彩',
+    // 兼容旧类型名称
+    '角度': '角度',
+    '动作': '动作',
+    '构图': '构图',
+    '光线': '光线',
+  };
+
+  // tips配置 - 按顺时针顺序排列：焦点 -> 构图 -> 色彩 -> 光线
   final List<Map<String, dynamic>> _tipsConfig = const [
     {
-      'type': '角度',
+      'type': '焦点', // 对应"主体与焦点"
       'quadrant': '左下',
       'angle': -135 * math.pi / 180,
       'color': Color(0xFF29B6F6), // 蓝色
@@ -54,15 +67,7 @@ class _AiTipAnimationState extends State<AiTipAnimation>
       'gradientEnd': Color(0xFF29B6F6),
     },
     {
-      'type': '动作',
-      'quadrant': '右下',
-      'angle': -45 * math.pi / 180,
-      'color': Color(0xFF66BB6A), // 绿色
-      'gradientStart': Color(0xFF81C784),
-      'gradientEnd': Color(0xFF66BB6A),
-    },
-    {
-      'type': '构图',
+      'type': '构图', // 对应"构图与画面布局"
       'quadrant': '左上',
       'angle': 135 * math.pi / 180,
       'color': Color(0xFF5C6BC0), // 紫蓝色
@@ -70,14 +75,39 @@ class _AiTipAnimationState extends State<AiTipAnimation>
       'gradientEnd': Color(0xFF5C6BC0),
     },
     {
-      'type': '光线',
+      'type': '色彩', // 对应"色彩与对比"
       'quadrant': '右上',
       'angle': 45 * math.pi / 180,
+      'color': Color(0xFFFFA726), // 橙色
+      'gradientStart': Color(0xFFFFB74D),
+      'gradientEnd': Color(0xFFFFA726),
+    },
+    {
+      'type': '光线', // 对应"光线与曝光"
+      'quadrant': '右下',
+      'angle': -45 * math.pi / 180,
       'color': Color(0xFFEF5350), // 红色
       'gradientStart': Color(0xFFE57373),
       'gradientEnd': Color(0xFFEF5350),
     },
   ];
+
+  // 获取类型的显示名称
+  String _getDisplayName(String fullType) {
+    return _typeDisplayNameMap[fullType] ?? fullType;
+  }
+
+  // 检查类型是否匹配（支持完整类型名和简短名称）
+  bool _isTypeMatch(String tipType, String configType) {
+    // 直接匹配
+    if (tipType == configType) return true;
+
+    // 通过映射表匹配
+    final displayName = _getDisplayName(tipType);
+    if (displayName == configType) return true;
+
+    return false;
+  }
 
   // 存储点击区域
   final List<Rect> _hitTestRects = [];
@@ -215,11 +245,11 @@ class _AiTipAnimationState extends State<AiTipAnimation>
             if (index >= _tipsConfig.length) return const SizedBox.shrink();
 
             final config = _tipsConfig[index];
-            final String tipType = config['type'] as String;
+            final String configType = config['type'] as String;
 
             // 查找对应类型的tip
             final tip = widget.tips.firstWhere(
-              (t) => t.type == tipType,
+              (t) => _isTypeMatch(t.type, configType),
               orElse: () => widget.tips[index],
             );
 
@@ -242,7 +272,7 @@ class _AiTipAnimationState extends State<AiTipAnimation>
               top: tipTop,
               left: tipLeft,
               child: GestureDetector(
-                onTap: () => _toggleTipExpand(tipType),
+                onTap: () => _toggleTipExpand(configType),
                 child: Container(
                   width: visibleSize,
                   height: visibleSize,
@@ -269,7 +299,7 @@ class _AiTipAnimationState extends State<AiTipAnimation>
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(
-                          tipType,
+                          configType,
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 16,
@@ -302,7 +332,7 @@ class _AiTipAnimationState extends State<AiTipAnimation>
                 animation: _expandAnimation,
                 builder: (context, child) {
                   final selectedTip = widget.tips.firstWhere(
-                    (t) => t.type == _selectedTipType,
+                    (t) => _isTypeMatch(t.type, _selectedTipType!),
                     orElse: () => widget.tips.first,
                   );
 
@@ -340,7 +370,7 @@ class _AiTipAnimationState extends State<AiTipAnimation>
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(
-                              selectedTip.type,
+                              _getDisplayName(selectedTip.type),
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 24,
