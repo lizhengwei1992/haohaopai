@@ -4,41 +4,15 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
+import 'package:flutter_image_compress/flutter_image_compress.dart';
 import '../models/shooting_tip.dart';
 
 class ImageAnalysisService {
   final _dio = Dio();
   static const String _analysisPrompt =
-      """你现在是一名 **专业摄影师与摄影导师**。我会给你一张照片或相机取景框画面，请分析这张图像并从以下维度提出**具体、专业、可执行的拍照建议**：
+      """你是资深摄影师。看这张相机取景画面，从以下四个方面各给出一条最关键、可直接执行的改进建议，每条不超过40字，只给动作、不解释原因。
 
-1. **构图与画面布局**
-   - 分析主体位置与背景元素的关系
-   - 是否遵循构图法则：三分法、引导线、对称/不对称、留白/负空间等
-   - 是否有需要重新取景或调整角度的建议
-
-2. **主体与焦点**
-   - 判定主体是否明显清晰
-   - 是否有干扰元素
-   - 焦点是否准确落在要表达的地方
-
-3. **光线与曝光**
-   - 现有光线的方向、强度、质感（顺光/侧光/逆光/柔光/硬光）
-   - 曝光是否准确，有无过曝/欠曝
-   - 提出可调节光线或利用反光/柔光方式的实用建议
-
-4. **色彩与对比**
-   - 色彩主题是否协调
-   - 是否存在色彩冲突或色偏
-   - 如何利用色彩对比增强主体表现力
-
-请严格按照以下JSON格式输出分析结果：
-{
-  "构图与画面布局": "基于三分法、引导线、对称等构图原则，指出当前画面的构图问题，并给出具体调整方案",
-  "主体与焦点": "根据拍摄对象特征（如身高、脸型、身材比例），给出最合适的拍摄角度建议（如平视、仰拍、俯拍等）",
-  "光线与曝光": "分析当前光线的方向、强度和质量，指出光线问题（如逆光、阴影、光线不足），并提供补光或调整拍摄方向的具体方案",
-  "色彩与对比": "xxxx"
-}
-""";
+严格输出JSON：{"构图与画面布局":"...","主体与焦点":"...","光线与曝光":"...","色彩与对比":"..."}""";
 
   // 直接使用图像字节数据进行分析（无需保存文件）
   Future<List<ShootingTip>> analyzeImageBytes(Uint8List imageBytes) async {
@@ -46,8 +20,13 @@ class ImageAnalysisService {
     debugPrint('📊 AI分析开始: ${startTime.toString()}');
 
     try {
-      // 直接使用字节数据转换为base64
-      final base64Image = base64Encode(imageBytes);
+      // 压缩图片到合适尺寸，降低上传体积与 image token，加速分析
+      final compressedBytes = await _compressForAnalysis(imageBytes);
+      debugPrint(
+          '📊 图片压缩: ${imageBytes.length} → ${compressedBytes.length} 字节 (${(compressedBytes.length / imageBytes.length * 100).toStringAsFixed(0)}%)，耗时 ${DateTime.now().difference(startTime).inMilliseconds}ms');
+
+      // 压缩后的字节转换为base64
+      final base64Image = base64Encode(compressedBytes);
       debugPrint(
           '📊 图像转base64完成: ${DateTime.now().difference(startTime).inMilliseconds}ms');
 
@@ -64,6 +43,7 @@ class ImageAnalysisService {
         data: {
           'model': 'qwen3-vl-plus', // 使用最新的视觉理解模型
           'response_format': {'type': 'json_object'},
+          'max_tokens': 500, // 限制输出长度，控制响应时间
           'messages': [
             {
               'role': 'user',
@@ -102,6 +82,26 @@ class ImageAnalysisService {
 
       // 降级到默认建议
       return _getDefaultTips();
+    }
+  }
+
+  /// 压缩图片用于分析：最长边缩到 1024、JPEG 质量 75
+  /// 场景理解无需原始分辨率，压缩可降低上传体积、image token 与延迟
+  Future<Uint8List> _compressForAnalysis(Uint8List bytes) async {
+    try {
+      final result = await FlutterImageCompress.compressWithList(
+        bytes,
+        minWidth: 1024,
+        minHeight: 1024,
+        quality: 75,
+        format: CompressFormat.jpeg,
+        autoCorrectionAngle: true,
+      );
+      return result.isNotEmpty ? result : bytes;
+    } catch (e) {
+      // 压缩失败时退回原图，保证链路不中断
+      debugPrint('📊 图片压缩失败，使用原图: $e');
+      return bytes;
     }
   }
 
