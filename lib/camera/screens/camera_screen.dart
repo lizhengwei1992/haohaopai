@@ -705,30 +705,33 @@ class _CameraScreenState extends State<CameraScreen>
               // AI UI Layer
               Consumer<AiTipProvider>(
                 builder: (context, provider, child) {
-                  // Analyzing State -> Show Vision Core Animation
-                  if (provider.isAnalyzing) {
-                    return Positioned(
-                      top: previewParams.topPosition,
-                      left: 0,
-                      width: previewParams.width,
-                      height: previewParams.height,
-                      child: const AiVisionCoreAnimation(),
-                    );
+                  // 初始状态不显示
+                  if (provider.state == AiTipState.initial) {
+                    return const SizedBox.shrink();
                   }
 
-                  // Showing Tips State -> Show Tips Display
-                  if (provider.state == AiTipState.showingTips) {
-                    return AiTipAnimation(
-                      tips: provider.tips.map((tip) => tip.toAiTip()).toList(),
-                      isAnalyzing: false, // Explicitly false
-                      onTipsVisibilityChanged: (visible) {
-                        debugPrint('教我拍提示可见性: $visible');
-                      },
-                    );
-                  }
+                  return Stack(
+                    children: [
+                      // 分析中：预览框四周的跑马灯边框
+                      if (provider.isAnalyzing)
+                        Positioned(
+                          top: previewParams.topPosition,
+                          left: 0,
+                          width: previewParams.width,
+                          height: previewParams.height,
+                          child: const AiVisionCoreAnimation(),
+                        ),
 
-                  // Default empty state
-                  return const SizedBox.shrink();
+                      // 旋转气泡：分析中旋转，出结果停止并展开
+                      Positioned.fill(
+                        child: AiTipAnimation(
+                          tips:
+                              provider.tips.map((tip) => tip.toAiTip()).toList(),
+                          isAnalyzing: provider.isAnalyzing,
+                        ),
+                      ),
+                    ],
+                  );
                 },
               ),
             ],

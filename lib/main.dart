@@ -133,26 +133,28 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _checkLoginStatus() async {
-    // 等待AuthProvider初始化完成
-    await Future.delayed(const Duration(milliseconds: 1000));
-
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
+
+    // 同时等待「登录状态加载完成」与「最短闪屏时长」，避免固定延迟导致的竞态：
+    // 若 init() 慢于延迟，会误判为未登录而跳去登录页
+    await Future.wait([
+      authProvider.init(),
+      Future.delayed(const Duration(milliseconds: 1000)),
+    ]);
+
+    if (!mounted) return;
 
     // 根据登录状态跳转到不同页面
     if (authProvider.isLoggedIn) {
       // 如果已登录，跳转到主页
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const ProfileScreen()),
-        );
-      }
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (context) => const ProfileScreen()),
+      );
     } else {
       // 如果未登录，跳转到登录页面
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const LoginPage()),
-        );
-      }
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (context) => const LoginPage()),
+      );
     }
   }
 
